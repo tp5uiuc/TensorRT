@@ -147,35 +147,19 @@ def deallocate_module(module: torch.fx.GraphModule) -> None:
     gc.collect()
 
 
-def use_python_runtime_parser(use_python_runtime: Optional[bool] = None) -> bool:
-    """Parses a user-provided input argument regarding Python runtime
-
-    Automatically handles cases where the user has not specified a runtime (None)
-
-    Returns True if the Python runtime should be used, False if the C++ runtime should be used
-    """
-    using_python_runtime = use_python_runtime
-    reason = ""
-
-    # Runtime was manually specified by the user
-    if using_python_runtime is not None:
-        reason = "as requested by user"
-    # Runtime was not manually specified by the user, automatically detect runtime
-    else:
-        try:
-            from torch_tensorrt.dynamo.runtime import TorchTensorRTModule  # noqa: F401
-
-            using_python_runtime = False
-            reason = "since C++ dependency was detected as present"
-        except ImportError:
-            using_python_runtime = True
-            reason = "since import failed, C++ dependency not installed"
-
-    logger.info(
-        f"Using {'Python-only' if using_python_runtime else 'Default'} Torch-TRT Runtime ({reason})"
+def _log_torch_compile_runtime_backend() -> None:
+    """Log which TRT runtime backend applies for a ``torch.compile`` / Dynamo compile."""
+    from torch_tensorrt.dynamo.runtime._RuntimeBackendSelection import (
+        RuntimeBackend,
+        get_runtime_backend,
     )
 
-    return using_python_runtime
+    backend = get_runtime_backend()
+    using_python = backend is RuntimeBackend.PYTHON
+    logger.info(
+        f"Using {'Python-only' if using_python else 'Default'} Torch-TRT Runtime "
+        f"(from runtime backend selection: {backend})"
+    )
 
 
 def cosine_similarity(gt_tensor: torch.Tensor, pred_tensor: torch.Tensor) -> float:
@@ -624,6 +608,15 @@ def parse_dynamo_kwargs(
         if "options" in kwargs and len(kwargs) == 1:
             kwargs = kwargs["options"]
 
+        if "use_python_runtime" in kwargs:
+            warnings.warn(
+                'torch.compile option "use_python_runtime" was removed; use '
+                'torch_tensorrt.runtime.set_runtime_backend("python"|"cpp") instead.',
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            kwargs = {k: v for k, v in kwargs.items() if k != "use_python_runtime"}
+
         if "truncate_long_and_double" in kwargs:
             if (
                 "truncate_double" in kwargs
@@ -649,8 +642,19 @@ def parse_dynamo_kwargs(
         valid_kwargs = {k: v for k, v in kwargs.items() if k in valid_attrs}
         settings = replace(settings, **valid_kwargs)
 
-    # Parse input runtime specification
-    settings.use_python_runtime = use_python_runtime_parser(settings.use_python_runtime)
+    # TODO: Remove once Dynamo precisions refactoring is complete
+    if "enabled_precisions" in kwargs:
+        enabled_precisions = {dtype._from(e) for e in kwargs["enabled_precisions"]}
+
+        if len(enabled_precisions) == 0:
+            logger.info(
+                f"No precision specified, defaulting to {_defaults.ENABLED_PRECISION}"
+            )
+            enabled_precisions = _defaults.ENABLED_PRECISIONS
+
+        settings.enabled_precisions = enabled_precisions
+
+    _log_torch_compile_runtime_backend()
 
     # Ensure device is a torch_tensorrt Device
     settings.device = to_torch_tensorrt_device(settings.device)
