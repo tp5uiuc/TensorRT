@@ -39,7 +39,6 @@ torch.manual_seed(0)
 
 model = models.resnet18(pretrained=True).to("cuda").eval()
 min_block_size = 1
-use_python_runtime = False
 
 
 def remove_timing_cache(path=TIMING_CACHE_PATH):
@@ -87,6 +86,7 @@ def torch_compile(iterations=3):
             reuse_cached_engines = True
 
         start.record()
+<<<<<<< HEAD
         compiled_model = torch.compile(
             model,
             backend="tensorrt",
@@ -100,6 +100,22 @@ def torch_compile(iterations=3):
         )
         with torch.no_grad():
             compiled_model(*inputs)  # trigger the compilation
+=======
+        with torch_trt.runtime.set_runtime_backend("python"):
+            compiled_model = torch.compile(
+                model,
+                backend="tensorrt",
+                options={
+                    "enabled_precisions": enabled_precisions,
+                    "min_block_size": min_block_size,
+                    "immutable_weights": False,
+                    "cache_built_engines": cache_built_engines,
+                    "reuse_cached_engines": reuse_cached_engines,
+                },
+            )
+            with torch.no_grad():
+                compiled_model(*inputs)  # trigger the compilation
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
         end.record()
         torch.cuda.synchronize()
         times.append(start.elapsed_time(end))
@@ -147,6 +163,7 @@ def dynamo_compile(iterations=3):
             reuse_cached_engines = True
 
         start.record()
+<<<<<<< HEAD
         trt_gm = torch_trt.dynamo.compile(
             exp_program,
             tuple(inputs),
@@ -157,6 +174,19 @@ def dynamo_compile(iterations=3):
             reuse_cached_engines=reuse_cached_engines,
             engine_cache_size=1 << 30,  # 1GB
         )
+=======
+        with torch_trt.runtime.set_runtime_backend("cpp"):
+            trt_gm = torch_trt.dynamo.compile(
+                exp_program,
+                tuple(inputs),
+                enabled_precisions=enabled_precisions,
+                min_block_size=min_block_size,
+                immutable_weights=False,
+                cache_built_engines=cache_built_engines,
+                reuse_cached_engines=reuse_cached_engines,
+                engine_cache_size=1 << 30,  # 1GB
+            )
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
         # output = trt_gm(*inputs)
         end.record()
         torch.cuda.synchronize()
@@ -255,6 +285,7 @@ def torch_compile_my_cache(iterations=3):
             reuse_cached_engines = True
 
         start.record()
+<<<<<<< HEAD
         compiled_model = torch.compile(
             model,
             backend="tensorrt",
@@ -269,6 +300,23 @@ def torch_compile_my_cache(iterations=3):
         )
         with torch.no_grad():
             compiled_model(*inputs)  # trigger the compilation
+=======
+        with torch_trt.runtime.set_runtime_backend("python"):
+            compiled_model = torch.compile(
+                model,
+                backend="tensorrt",
+                options={
+                    "enabled_precisions": enabled_precisions,
+                    "min_block_size": min_block_size,
+                    "immutable_weights": False,
+                    "cache_built_engines": cache_built_engines,
+                    "reuse_cached_engines": reuse_cached_engines,
+                    "custom_engine_cache": engine_cache,
+                },
+            )
+            with torch.no_grad():
+                compiled_model(*inputs)  # trigger the compilation
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
         end.record()
         torch.cuda.synchronize()
         times.append(start.elapsed_time(end))

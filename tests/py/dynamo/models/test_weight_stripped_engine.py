@@ -34,7 +34,11 @@ class TestWeightStrippedEngine(TestCase):
         exp_program = torch.export.export(pyt_model, example_inputs)
 
         settings = {
+<<<<<<< HEAD
             "use_python_runtime": False,
+=======
+            "enabled_precisions": {torch.float},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
             "min_block_size": 1,
             "immutable_weights": False,
             "strip_engine_weights": False,
@@ -83,7 +87,11 @@ class TestWeightStrippedEngine(TestCase):
         example_inputs = (torch.randn((100, 3, 224, 224)).to("cuda"),)
 
         settings = {
+<<<<<<< HEAD
             "use_python_runtime": False,
+=======
+            "enabled_precisions": {torch.float},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
             "min_block_size": 1,
             "immutable_weights": False,
             "strip_engine_weights": True,
@@ -169,7 +177,11 @@ class TestWeightStrippedEngine(TestCase):
         trt_gm = torch_trt.dynamo.compile(
             exp_program,
             tuple(inputs),
+<<<<<<< HEAD
             use_python_runtime=True,
+=======
+            enabled_precisions={torch.float},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
             min_block_size=1,
             immutable_weights=False,
             strip_engine_weights=True,
@@ -193,7 +205,11 @@ class TestWeightStrippedEngine(TestCase):
             pyt_model,
             backend="tensorrt",
             options={
+<<<<<<< HEAD
                 "use_python_runtime": False,
+=======
+                "enabled_precisions": {torch.float},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
                 "min_block_size": 1,
                 "immutable_weights": False,
                 "cache_built_engines": False,
@@ -239,7 +255,11 @@ class TestWeightStrippedEngine(TestCase):
         trt_gm = torch_trt.dynamo.compile(
             exp_program,
             tuple(example_inputs),
+<<<<<<< HEAD
             use_python_runtime=True,
+=======
+            enabled_precisions={torch.float},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
             min_block_size=1,
             immutable_weights=False,
             strip_engine_weights=False,
@@ -316,7 +336,11 @@ class TestWeightStrippedEngine(TestCase):
             trt_gm = torch_trt.dynamo.compile(
                 exp_program,
                 tuple(inputs),
+<<<<<<< HEAD
                 use_python_runtime=True,
+=======
+                enabled_precisions={torch.float},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
                 min_block_size=1,
                 immutable_weights=False,
                 cache_built_engines=cache_built_engines,
@@ -399,7 +423,11 @@ class TestWeightStrippedEngine(TestCase):
                 pyt_model,
                 backend="tensorrt",
                 options={
+<<<<<<< HEAD
                     "use_python_runtime": False,
+=======
+                    "enabled_precisions": {torch.float},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
                     "min_block_size": 1,
                     "immutable_weights": False,
                     "cache_built_engines": cache_built_engines,
@@ -475,7 +503,11 @@ class TestWeightStrippedEngine(TestCase):
                 pyt_model,
                 backend="tensorrt",
                 options={
+<<<<<<< HEAD
                     "use_python_runtime": True,
+=======
+                    "enabled_precisions": {torch.float},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
                     "min_block_size": 1,
                     "immutable_weights": False,
                     "cache_built_engines": True,
@@ -517,7 +549,6 @@ class TestWeightStrippedEngine(TestCase):
             inputs=tuple(inputs),
             min_block_size=1,
             immutable_weights=False,
-            use_python_runtime=True,
             strip_engine_weights=True,
             refit_identical_engine_weights=False,
         )
@@ -558,15 +589,16 @@ class TestWeightStrippedEngine(TestCase):
             else:
                 use_python_runtime = False
 
-            trt_gm = torch_trt.dynamo.compile(
-                exp_program,
-                tuple(inputs),
-                use_python_runtime=use_python_runtime,
-                min_block_size=1,
-                immutable_weights=False,
-                strip_engine_weights=True,
-                refit_identical_engine_weights=False,
-            )
+            backend = "python" if use_python_runtime else "cpp"
+            with torch_trt.runtime.set_runtime_backend(backend):
+                trt_gm = torch_trt.dynamo.compile(
+                    exp_program,
+                    tuple(inputs),
+                    min_block_size=1,
+                    immutable_weights=False,
+                    strip_engine_weights=True,
+                    refit_identical_engine_weights=False,
+                )
 
             output = trt_gm(*inputs)
             assertions.assertEqual(output.sum(), 0, msg="results should be all zeros")
@@ -600,7 +632,11 @@ class TestWeightStrippedEngine(TestCase):
         trt_gm = torch_trt.dynamo.compile(
             exp_program,
             tuple(example_inputs),
+<<<<<<< HEAD
             use_python_runtime=True,
+=======
+            enabled_precisions={torch.float},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
             min_block_size=1,
             immutable_weights=False,
             strip_engine_weights=True,
@@ -652,7 +688,11 @@ class TestWeightStrippedEngine(TestCase):
         trt_gm = torch_trt.dynamo.compile(
             exp_program,
             inputs,
+<<<<<<< HEAD
             use_python_runtime=True,
+=======
+            enabled_precisions={torch.float},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
             min_block_size=1,
             immutable_weights=False,
             cache_built_engines=False,
@@ -692,7 +732,11 @@ class TestWeightStrippedEngine(TestCase):
             pyt_model,
             backend="tensorrt",
             options={
+<<<<<<< HEAD
                 "use_python_runtime": False,
+=======
+                "enabled_precisions": {torch.float},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
                 "min_block_size": 1,
                 "immutable_weights": False,
                 "cache_built_engines": False,

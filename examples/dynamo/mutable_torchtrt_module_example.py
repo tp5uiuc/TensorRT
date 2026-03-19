@@ -32,12 +32,17 @@ inputs = [torch.rand((1, 3, 224, 224)).to("cuda")]
 # Initialize the Mutable Torch TensorRT Module with settings.
 # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 settings = {
+<<<<<<< HEAD
     "use_python_runtime": False,
+=======
+    "enabled_precisions": {torch.float32},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
     "immutable_weights": False,
 }
 
 model = models.resnet18(pretrained=True).to("cuda").eval()
-mutable_module = torch_trt.MutableTorchTensorRTModule(model, **settings)
+with torch_trt.runtime.set_runtime_backend("cpp"):
+    mutable_module = torch_trt.MutableTorchTensorRTModule(model, **settings)
 # You can use the mutable module just like the original pytorch module. The compilation happens while you first call the mutable module.
 with torch.no_grad():
     mutable_module(*inputs)
@@ -66,7 +71,7 @@ print("Refit successfully!")
 # Saving Mutable Torch TensorRT Module
 # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-# Currently, saving is only enabled when "use_python_runtime" = False in settings
+# Saving requires a C++-runtime compiled graph (see MutableTorchTensorRTModule.save).
 torch_trt.MutableTorchTensorRTModule.save(mutable_module, "mutable_module.pkl")
 reload = torch_trt.MutableTorchTensorRTModule.load("mutable_module.pkl")
 
@@ -77,7 +82,11 @@ reload = torch_trt.MutableTorchTensorRTModule.load("mutable_module.pkl")
 
 with torch.no_grad():
     settings = {
+<<<<<<< HEAD
         "use_python_runtime": True,
+=======
+        "enabled_precisions": {torch.float16},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
         "immutable_weights": False,
     }
 
@@ -91,7 +100,8 @@ with torch.no_grad():
     pipe.to(device)
 
     # The only extra line you need
-    pipe.unet = torch_trt.MutableTorchTensorRTModule(pipe.unet, **settings)
+    with torch_trt.runtime.set_runtime_backend("python"):
+        pipe.unet = torch_trt.MutableTorchTensorRTModule(pipe.unet, **settings)
     BATCH = torch.export.Dim("BATCH", min=2, max=24)
     _HEIGHT = torch.export.Dim("_HEIGHT", min=16, max=32)
     _WIDTH = torch.export.Dim("_WIDTH", min=16, max=32)
@@ -207,6 +217,7 @@ start = torch.cuda.Event(enable_timing=True)
 end = torch.cuda.Event(enable_timing=True)
 
 example_inputs = (torch.randn((100, 3, 224, 224)).to("cuda"),)
+<<<<<<< HEAD
 model = torch_trt.MutableTorchTensorRTModule(
     model,
     use_python_runtime=True,
@@ -216,6 +227,18 @@ model = torch_trt.MutableTorchTensorRTModule(
     reuse_cached_engines=True,
     engine_cache_size=1 << 30,  # 1GB
 )
+=======
+with torch_trt.runtime.set_runtime_backend("python"):
+    model = torch_trt.MutableTorchTensorRTModule(
+        model,
+        enabled_precisions={torch.float},
+        min_block_size=1,
+        immutable_weights=False,
+        cache_built_engines=True,
+        reuse_cached_engines=True,
+        engine_cache_size=1 << 30,  # 1GB
+    )
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
 
 
 def remove_timing_cache(path=TIMING_CACHE_PATH):

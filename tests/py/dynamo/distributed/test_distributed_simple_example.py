@@ -67,7 +67,11 @@ tp_model = torch.compile(
     backend=backend,
     options={
         "truncate_long_and_double": True,
+<<<<<<< HEAD
         "use_python_runtime": True,
+=======
+        "enabled_precisions": {torch.float32, torch.float16},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
         "min_block_size": 1,
         "use_distributed_mode_trace": True,
     },

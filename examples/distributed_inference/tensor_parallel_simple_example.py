@@ -116,6 +116,7 @@ torch.manual_seed(0)
 inp = torch.rand(20, 10, device="cuda")
 python_result = tp_model(inp)
 
+<<<<<<< HEAD
 if args.mode == "load":
     # Load per-rank model: /tmp/tp_model.ep -> /tmp/tp_model_rank0_of_2.ep
     logger.info(f"Loading from {args.save_path}")
@@ -124,6 +125,21 @@ if args.mode == "load":
     dist.barrier()
     assert (python_result - output).std() < 0.01, "Result mismatch"
     logger.info("Load successful!")
+=======
+backend = "torch_tensorrt"
+with torch_tensorrt.runtime.set_runtime_backend("python"):
+    tp_model = torch.compile(
+        tp_model,
+        backend=backend,
+        options={
+            "truncate_long_and_double": True,
+            "enabled_precisions": {torch.float32, torch.float16},
+            "min_block_size": 1,
+            "use_distributed_mode_trace": True,
+        },
+        dynamic=None,
+    )
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
 
 elif args.mode == "jit_python":
     trt_model = torch.compile(

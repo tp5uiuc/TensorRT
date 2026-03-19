@@ -232,7 +232,11 @@ class TestEngineCache(TestCase):
             trt_gm = torch_trt.dynamo.compile(
                 exp_program,
                 tuple(inputs),
+<<<<<<< HEAD
                 use_python_runtime=True,
+=======
+                enabled_precisions={torch.float},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
                 min_block_size=1,
                 immutable_weights=False,
                 cache_built_engines=cache_built_engines,
@@ -306,7 +310,12 @@ class TestEngineCache(TestCase):
             trt_gm = torch_trt.dynamo.compile(
                 exp_program,
                 tuple(inputs),
+<<<<<<< HEAD
                 use_python_runtime=True,
+=======
+                use_explicit_typing=False,
+                enabled_precisions={torch.float},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
                 min_block_size=1,
                 immutable_weights=False,
                 cache_built_engines=cache_built_engines,
@@ -363,7 +372,11 @@ class TestEngineCache(TestCase):
             trt_gm = torch_trt.dynamo.compile(
                 torch.export.export(model, args=inputs),
                 inputs=inputs,
+<<<<<<< HEAD
                 use_python_runtime=False,
+=======
+                enabled_precisions={torch.float},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
                 min_block_size=1,
                 immutable_weights=False,
                 cache_built_engines=True,
@@ -423,7 +436,12 @@ class TestEngineCache(TestCase):
                 model,
                 backend="tensorrt",
                 options={
+<<<<<<< HEAD
                     "use_python_runtime": False,
+=======
+                    "use_explicit_typing": False,
+                    "enabled_precisions": {torch.float},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
                     "min_block_size": 1,
                     "immutable_weights": False,
                     "cache_built_engines": cache_built_engines,
@@ -487,7 +505,12 @@ class TestEngineCache(TestCase):
                 model,
                 backend="tensorrt",
                 options={
+<<<<<<< HEAD
                     "use_python_runtime": False,
+=======
+                    "use_explicit_typing": False,
+                    "enabled_precisions": {torch.float},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
                     "min_block_size": 1,
                     "immutable_weights": False,
                     "cache_built_engines": cache_built_engines,
@@ -542,7 +565,12 @@ class TestEngineCache(TestCase):
                 model,
                 inputs=inputs,
                 **{
+<<<<<<< HEAD
                     "use_python_runtime": True,
+=======
+                    "use_explicit_typing": False,
+                    "enabled_precisions": {torch.float},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
                     "min_block_size": 1,
                     "immutable_weights": False,
                     "cache_built_engines": True,
@@ -583,7 +611,12 @@ class TestEngineCache(TestCase):
                 model,
                 backend="tensorrt",
                 options={
+<<<<<<< HEAD
                     "use_python_runtime": True,
+=======
+                    "use_explicit_typing": False,
+                    "enabled_precisions": {torch.float},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
                     "min_block_size": 1,
                     "immutable_weights": False,
                     "cache_built_engines": True,
@@ -682,7 +715,11 @@ class TestEngineCache(TestCase):
         trt_gm = torch_trt.dynamo.compile(
             exp_program,
             inputs,
+<<<<<<< HEAD
             use_python_runtime=True,
+=======
+            enabled_precisions={torch.float},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
             min_block_size=1,
             immutable_weights=False,
             cache_built_engines=False,
@@ -733,7 +770,11 @@ class TestEngineCache(TestCase):
             trt_gm = torch_trt.dynamo.compile(
                 exp_program,
                 tuple(inputs),
+<<<<<<< HEAD
                 use_python_runtime=True,
+=======
+                enabled_precisions={torch.float},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
                 min_block_size=1,
                 cache_built_engines=cache_built_engines,
                 reuse_cached_engines=reuse_cached_engines,
@@ -909,7 +950,11 @@ class TestEngineCache(TestCase):
         trt_gm = torch_trt.dynamo.compile(
             llama2_ep,
             inputs=[input_ids],
+<<<<<<< HEAD
             use_python_runtime=True,
+=======
+            enabled_precisions={torch.float32},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
             min_block_size=1,
             immutable_weights=False,
             truncate_double=True,
@@ -961,7 +1006,11 @@ class TestEngineCache(TestCase):
             trt_gm = torch_trt.dynamo.compile(
                 llama2_ep,
                 inputs=[input_ids],
+<<<<<<< HEAD
                 use_python_runtime=True,
+=======
+                enabled_precisions={torch.float32},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
                 min_block_size=1,
                 truncate_double=True,
                 device=DEVICE,

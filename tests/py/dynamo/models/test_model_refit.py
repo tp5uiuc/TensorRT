@@ -50,11 +50,10 @@ def test_mapping():
         for i in inputs
     ]
     min_block_size = 1
-    use_python_runtime = False
-
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
+<<<<<<< HEAD
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
@@ -62,6 +61,16 @@ def test_mapping():
         min_block_size=min_block_size,
         immutable_weights=False,
     )
+=======
+    with torchtrt.runtime.set_runtime_backend("cpp"):
+        trt_gm = torchtrt.dynamo.compile(
+            exp_program,
+            tuple(inputs),
+            enabled_precisions=enabled_precisions,
+            min_block_size=min_block_size,
+            immutable_weights=False,
+        )
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
     settings = trt_gm._run_on_acc_0.settings
     runtime = trt.Runtime(TRT_LOGGER)
 
@@ -114,11 +123,10 @@ def test_conv_refit_with_weightmap():
     model2 = net().eval().to("cuda")
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
-    use_python_runtime = True
-
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
+<<<<<<< HEAD
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
@@ -126,6 +134,16 @@ def test_conv_refit_with_weightmap():
         min_block_size=min_block_size,
         immutable_weights=False,
     )
+=======
+    with torchtrt.runtime.set_runtime_backend("python"):
+        trt_gm = torchtrt.dynamo.compile(
+            exp_program,
+            tuple(inputs),
+            enabled_precisions=enabled_precisions,
+            min_block_size=min_block_size,
+            immutable_weights=False,
+        )
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
 
     new_trt_gm = refit_module_weights(
         compiled_module=trt_gm,
@@ -177,11 +195,10 @@ def test_batch_norm_refit_one_engine_with_weightmap():
     model2 = net().eval().to("cuda")
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
-    use_python_runtime = True
-
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
+<<<<<<< HEAD
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
@@ -189,6 +206,16 @@ def test_batch_norm_refit_one_engine_with_weightmap():
         min_block_size=min_block_size,
         immutable_weights=False,
     )
+=======
+    with torchtrt.runtime.set_runtime_backend("python"):
+        trt_gm = torchtrt.dynamo.compile(
+            exp_program,
+            tuple(inputs),
+            enabled_precisions=enabled_precisions,
+            min_block_size=min_block_size,
+            immutable_weights=False,
+        )
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
 
     new_trt_gm = refit_module_weights(
         compiled_module=trt_gm,
@@ -240,11 +267,10 @@ def test_batch_norm_refit_one_engine_without_weightmap():
     model2 = net().eval().to("cuda")
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
-    use_python_runtime = True
-
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
+<<<<<<< HEAD
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
@@ -252,6 +278,16 @@ def test_batch_norm_refit_one_engine_without_weightmap():
         min_block_size=min_block_size,
         immutable_weights=False,
     )
+=======
+    with torchtrt.runtime.set_runtime_backend("python"):
+        trt_gm = torchtrt.dynamo.compile(
+            exp_program,
+            tuple(inputs),
+            enabled_precisions=enabled_precisions,
+            min_block_size=min_block_size,
+            immutable_weights=False,
+        )
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
 
     new_trt_gm = refit_module_weights(
         compiled_module=trt_gm,
@@ -294,11 +330,10 @@ def test_refit_one_engine_with_weightmap():
     model2 = models.resnet18(pretrained=True).eval().to("cuda")
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
-    use_python_runtime = True
-
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
+<<<<<<< HEAD
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
@@ -306,6 +341,16 @@ def test_refit_one_engine_with_weightmap():
         min_block_size=min_block_size,
         immutable_weights=False,
     )
+=======
+    with torchtrt.runtime.set_runtime_backend("python"):
+        trt_gm = torchtrt.dynamo.compile(
+            exp_program,
+            tuple(inputs),
+            enabled_precisions=enabled_precisions,
+            min_block_size=min_block_size,
+            immutable_weights=False,
+        )
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
 
     new_trt_gm = refit_module_weights(
         compiled_module=trt_gm,
@@ -348,11 +393,10 @@ def test_refit_one_engine_no_map_with_weightmap():
     model2 = models.resnet18(pretrained=True).eval().to("cuda")
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
-    use_python_runtime = False
-
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
+<<<<<<< HEAD
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
@@ -360,6 +404,16 @@ def test_refit_one_engine_no_map_with_weightmap():
         min_block_size=min_block_size,
         immutable_weights=False,
     )
+=======
+    with torchtrt.runtime.set_runtime_backend("cpp"):
+        trt_gm = torchtrt.dynamo.compile(
+            exp_program,
+            tuple(inputs),
+            enabled_precisions=enabled_precisions,
+            min_block_size=min_block_size,
+            immutable_weights=False,
+        )
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
 
     trt_gm._run_on_acc_0.weight_name_map = None
 
@@ -403,11 +457,10 @@ def test_refit_one_engine_with_wrong_weightmap():
     model2 = models.resnet18(pretrained=True).eval().to("cuda")
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
-    use_python_runtime = True
-
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
+<<<<<<< HEAD
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
@@ -415,6 +468,16 @@ def test_refit_one_engine_with_wrong_weightmap():
         min_block_size=min_block_size,
         immutable_weights=False,
     )
+=======
+    with torchtrt.runtime.set_runtime_backend("python"):
+        trt_gm = torchtrt.dynamo.compile(
+            exp_program,
+            tuple(inputs),
+            enabled_precisions=enabled_precisions,
+            min_block_size=min_block_size,
+            immutable_weights=False,
+        )
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
     # Manually Deleted all batch norm layer. This suppose to fail the fast refit
     trt_gm._run_on_acc_0.weight_name_map = {
         k: v
@@ -467,11 +530,10 @@ def test_refit_one_engine_bert_with_weightmap():
     model2 = BertModel.from_pretrained("bert-base-uncased").eval().to("cuda")
     nn.init.xavier_normal_(model2.embeddings.word_embeddings.weight)
     min_block_size = 1
-    use_python_runtime = True
-
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
+<<<<<<< HEAD
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
@@ -479,6 +541,16 @@ def test_refit_one_engine_bert_with_weightmap():
         min_block_size=min_block_size,
         immutable_weights=False,
     )
+=======
+    with torchtrt.runtime.set_runtime_backend("python"):
+        trt_gm = torchtrt.dynamo.compile(
+            exp_program,
+            tuple(inputs),
+            enabled_precisions=enabled_precisions,
+            min_block_size=min_block_size,
+            immutable_weights=False,
+        )
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
 
     new_trt_gm = refit_module_weights(
         compiled_module=trt_gm,
@@ -530,11 +602,10 @@ def test_refit_one_engine_inline_runtime_with_weightmap(tmpdir):
     model2 = models.resnet18(pretrained=True).eval().to("cuda")
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
-    use_python_runtime = False
-
     exp_program = torch.export.export(model, tuple(inputs), strict=False)
     exp_program2 = torch.export.export(model2, tuple(inputs), strict=False)
 
+<<<<<<< HEAD
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
@@ -542,6 +613,16 @@ def test_refit_one_engine_inline_runtime_with_weightmap(tmpdir):
         min_block_size=min_block_size,
         immutable_weights=False,
     )
+=======
+    with torchtrt.runtime.set_runtime_backend("cpp"):
+        trt_gm = torchtrt.dynamo.compile(
+            exp_program,
+            tuple(inputs),
+            enabled_precisions=enabled_precisions,
+            min_block_size=min_block_size,
+            immutable_weights=False,
+        )
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
     torchtrt.save(trt_gm, trt_ep_path, arg_inputs=inputs, retrace=True)
     trt_gm = torch.export.load(trt_ep_path)
 
@@ -586,11 +667,10 @@ def test_refit_one_engine_python_runtime_with_weightmap():
     model2 = models.resnet18(pretrained=True).eval().to("cuda")
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
-    use_python_runtime = True
-
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
+<<<<<<< HEAD
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
@@ -598,6 +678,16 @@ def test_refit_one_engine_python_runtime_with_weightmap():
         min_block_size=min_block_size,
         immutable_weights=False,
     )
+=======
+    with torchtrt.runtime.set_runtime_backend("python"):
+        trt_gm = torchtrt.dynamo.compile(
+            exp_program,
+            tuple(inputs),
+            enabled_precisions=enabled_precisions,
+            min_block_size=min_block_size,
+            immutable_weights=False,
+        )
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
 
     new_trt_gm = refit_module_weights(
         compiled_module=trt_gm,
@@ -655,12 +745,11 @@ def test_refit_multiple_engine_with_weightmap():
 
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
-    use_python_runtime = False
-
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
     torch_executed_ops = {"torch.ops.aten.convolution.default"}
+<<<<<<< HEAD
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
@@ -670,6 +759,18 @@ def test_refit_multiple_engine_with_weightmap():
         torch_executed_ops=torch_executed_ops,
         reuse_cached_engines=False,
     )
+=======
+    with torchtrt.runtime.set_runtime_backend("cpp"):
+        trt_gm = torchtrt.dynamo.compile(
+            exp_program,
+            tuple(inputs),
+            enabled_precisions=enabled_precisions,
+            min_block_size=min_block_size,
+            immutable_weights=False,
+            torch_executed_ops=torch_executed_ops,
+            reuse_cached_engines=False,
+        )
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
 
     new_trt_gm = refit_module_weights(
         compiled_module=trt_gm,
@@ -719,12 +820,11 @@ def test_refit_multiple_engine_with_weightmap_cpu_offload():
 
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
-    use_python_runtime = False
-
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
     torch_executed_ops = {"torch.ops.aten.convolution.default"}
+<<<<<<< HEAD
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
@@ -735,6 +835,19 @@ def test_refit_multiple_engine_with_weightmap_cpu_offload():
         reuse_cached_engines=False,
         offload_module_to_cpu=True,
     )
+=======
+    with torchtrt.runtime.set_runtime_backend("cpp"):
+        trt_gm = torchtrt.dynamo.compile(
+            exp_program,
+            tuple(inputs),
+            enabled_precisions=enabled_precisions,
+            min_block_size=min_block_size,
+            immutable_weights=False,
+            torch_executed_ops=torch_executed_ops,
+            reuse_cached_engines=False,
+            offload_module_to_cpu=True,
+        )
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
 
     new_trt_gm = refit_module_weights(
         compiled_module=trt_gm,
@@ -779,11 +892,10 @@ def test_refit_one_engine_without_weightmap():
     model2 = models.resnet18(pretrained=False).eval().to("cuda")
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
-    use_python_runtime = False
-
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
+<<<<<<< HEAD
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
@@ -791,6 +903,16 @@ def test_refit_one_engine_without_weightmap():
         min_block_size=min_block_size,
         immutable_weights=False,
     )
+=======
+    with torchtrt.runtime.set_runtime_backend("cpp"):
+        trt_gm = torchtrt.dynamo.compile(
+            exp_program,
+            tuple(inputs),
+            enabled_precisions=enabled_precisions,
+            min_block_size=min_block_size,
+            immutable_weights=False,
+        )
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
 
     new_trt_gm = refit_module_weights(
         compiled_module=trt_gm,
@@ -837,11 +959,10 @@ def test_refit_one_engine_bert_without_weightmap():
     model2 = BertModel.from_pretrained("bert-base-uncased").eval().to("cuda")
     nn.init.xavier_normal_(model2.embeddings.word_embeddings.weight)
     min_block_size = 1
-    use_python_runtime = False
-
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
+<<<<<<< HEAD
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
@@ -849,6 +970,16 @@ def test_refit_one_engine_bert_without_weightmap():
         min_block_size=min_block_size,
         immutable_weights=False,
     )
+=======
+    with torchtrt.runtime.set_runtime_backend("cpp"):
+        trt_gm = torchtrt.dynamo.compile(
+            exp_program,
+            tuple(inputs),
+            enabled_precisions=enabled_precisions,
+            min_block_size=min_block_size,
+            immutable_weights=False,
+        )
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
 
     new_trt_gm = refit_module_weights(
         compiled_module=trt_gm,
@@ -899,11 +1030,10 @@ def test_refit_one_engine_inline_runtime_without_weightmap(tmpdir):
     model2 = models.resnet18(pretrained=False).eval().to("cuda")
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
-    use_python_runtime = False
-
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
+<<<<<<< HEAD
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
@@ -911,6 +1041,16 @@ def test_refit_one_engine_inline_runtime_without_weightmap(tmpdir):
         min_block_size=min_block_size,
         immutable_weights=False,
     )
+=======
+    with torchtrt.runtime.set_runtime_backend("cpp"):
+        trt_gm = torchtrt.dynamo.compile(
+            exp_program,
+            tuple(inputs),
+            enabled_precisions=enabled_precisions,
+            min_block_size=min_block_size,
+            immutable_weights=False,
+        )
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
     torchtrt.save(trt_gm, trt_ep_path, arg_inputs=inputs)
     trt_gm = torch.export.load(trt_ep_path)
     new_trt_gm = refit_module_weights(
@@ -953,11 +1093,10 @@ def test_refit_one_engine_python_runtime_without_weightmap():
     model2 = models.resnet18(pretrained=False).eval().to("cuda")
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
-    use_python_runtime = True
-
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
+<<<<<<< HEAD
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
@@ -965,6 +1104,16 @@ def test_refit_one_engine_python_runtime_without_weightmap():
         min_block_size=min_block_size,
         immutable_weights=False,
     )
+=======
+    with torchtrt.runtime.set_runtime_backend("python"):
+        trt_gm = torchtrt.dynamo.compile(
+            exp_program,
+            tuple(inputs),
+            enabled_precisions=enabled_precisions,
+            min_block_size=min_block_size,
+            immutable_weights=False,
+        )
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
 
     new_trt_gm = refit_module_weights(
         compiled_module=trt_gm,
@@ -1022,12 +1171,11 @@ def test_refit_multiple_engine_without_weightmap():
 
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
-    use_python_runtime = False
-
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
     torch_executed_ops = {"torch.ops.aten.convolution.default"}
+<<<<<<< HEAD
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
@@ -1037,6 +1185,18 @@ def test_refit_multiple_engine_without_weightmap():
         torch_executed_ops=torch_executed_ops,
         reuse_cached_engines=False,
     )
+=======
+    with torchtrt.runtime.set_runtime_backend("cpp"):
+        trt_gm = torchtrt.dynamo.compile(
+            exp_program,
+            tuple(inputs),
+            enabled_precisions=enabled_precisions,
+            min_block_size=min_block_size,
+            immutable_weights=False,
+            torch_executed_ops=torch_executed_ops,
+            reuse_cached_engines=False,
+        )
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
 
     new_trt_gm = refit_module_weights(
         compiled_module=trt_gm,

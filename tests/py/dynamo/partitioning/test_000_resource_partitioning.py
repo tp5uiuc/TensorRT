@@ -44,12 +44,20 @@ class TestResourcePartitioning(TestCase):
         model.to("cuda")
         inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
 
+<<<<<<< HEAD
         use_python_runtime = False
+=======
+        enabled_precisions = {torch.float}
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
 
         exp_program = torch.export.export(model, tuple(inputs))
 
         compilation_options = {
+<<<<<<< HEAD
             "use_python_runtime": use_python_runtime,
+=======
+            "enabled_precisions": enabled_precisions,
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
             "min_block_size": 1,
             "immutable_weights": True,
             "reuse_cached_engines": False,

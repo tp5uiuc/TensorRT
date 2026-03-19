@@ -47,7 +47,11 @@ def compile_bert(iterations=3):
 
         start.record()
         compilation_kwargs = {
+<<<<<<< HEAD
             "use_python_runtime": False,
+=======
+            "enabled_precisions": {torch.float},
+>>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
             "truncate_double": True,
             "min_block_size": 1,
             "immutable_weights": False,
