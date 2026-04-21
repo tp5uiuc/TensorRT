@@ -599,7 +599,9 @@ void TRTEngine::apply_runtime_cache() {
 }
 
 void TRTEngine::apply_dynamic_shapes_kernel_strategy() {
-  // Body added in a follow-up commit that wires the dynamic shapes kernel specialization strategy.
+  runtime_config->setDynamicShapesKernelSpecializationStrategy(
+      static_cast<nvinfer1::DynamicShapesKernelSpecializationStrategy>(dynamic_shapes_kernel_strategy));
+  LOG_DEBUG("Dynamic shapes kernel specialization strategy set to " << dynamic_shapes_kernel_strategy);
 }
 
 void TRTEngine::apply_cuda_graph_strategy() {
