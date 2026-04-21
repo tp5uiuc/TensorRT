@@ -127,6 +127,7 @@ if args.mode == "load":
     logger.info("Load successful!")
 =======
 backend = "torch_tensorrt"
+<<<<<<< HEAD
 with torch_tensorrt.runtime.set_runtime_backend("python"):
     tp_model = torch.compile(
         tp_model,
@@ -140,6 +141,19 @@ with torch_tensorrt.runtime.set_runtime_backend("python"):
         dynamic=None,
     )
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+tp_model = torch.compile(
+    tp_model,
+    backend=backend,
+    options={
+        "truncate_long_and_double": True,
+        "enabled_precisions": {torch.float32, torch.float16},
+        "min_block_size": 1,
+        "use_distributed_mode_trace": True,
+    },
+    dynamic=None,
+)
+>>>>>>> 231434eae (Changed tests and docs)
 
 elif args.mode == "jit_python":
     trt_model = torch.compile(

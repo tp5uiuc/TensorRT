@@ -493,6 +493,7 @@ def test_cosmos_true_div(ir):
             strict=False,
         )
 <<<<<<< HEAD
+<<<<<<< HEAD
         trt_model = torchtrt.dynamo.compile(
             ep,
             inputs=(hidden_states,),
@@ -517,6 +518,19 @@ def test_cosmos_true_div(ir):
             )
             trt_output = trt_model(hidden_states)
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+        trt_model = torchtrt.dynamo.compile(
+            ep,
+            inputs=(hidden_states,),
+            enabled_precisions={torch.bfloat16},
+            use_explicit_typing=False,
+            use_fp32_acc=False,
+            device="cuda:0",
+            disable_tf32=True,
+            min_block_size=1,
+        )
+        trt_output = trt_model(hidden_states)
+>>>>>>> 231434eae (Changed tests and docs)
 
     cos_sim = cosine_similarity(pyt_output, trt_output)
     assertions.assertTrue(

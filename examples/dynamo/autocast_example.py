@@ -70,11 +70,18 @@ pytorch_outs = model(*inputs)
 # the documentation for more details.
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 231434eae (Changed tests and docs)
 trt_autocast_mod = torch_tensorrt.compile(
     ep.module(),
     arg_inputs=inputs,
     min_block_size=1,
+<<<<<<< HEAD
     use_python_runtime=True,
+=======
+    use_explicit_typing=True,
+>>>>>>> 231434eae (Changed tests and docs)
     enable_autocast=True,
     autocast_low_precision_type=torch.bfloat16,
     autocast_excluded_nodes={"^conv1$", "relu"},
@@ -83,6 +90,7 @@ trt_autocast_mod = torch_tensorrt.compile(
     autocast_max_depth_of_reduction=None,
     autocast_calibration_dataloader=calibration_dataloader,
 )
+<<<<<<< HEAD
 =======
 with torch_tensorrt.runtime.set_runtime_backend("python"):
     trt_autocast_mod = torch_tensorrt.compile(
@@ -99,6 +107,8 @@ with torch_tensorrt.runtime.set_runtime_backend("python"):
         autocast_calibration_dataloader=calibration_dataloader,
     )
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+>>>>>>> 231434eae (Changed tests and docs)
 
 autocast_outs = trt_autocast_mod(*inputs)
 

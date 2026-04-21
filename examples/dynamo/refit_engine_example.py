@@ -59,15 +59,23 @@ workspace_size = 20 << 30
 min_block_size = 0
 torch_executed_ops = {}
 <<<<<<< HEAD
+<<<<<<< HEAD
 trt_gm = torch_trt.dynamo.compile(
     exp_program,
     tuple(inputs),
     use_python_runtime=use_python_runtime,
+=======
+trt_gm = torch_trt.dynamo.compile(
+    exp_program,
+    tuple(inputs),
+    enabled_precisions=enabled_precisions,
+>>>>>>> 231434eae (Changed tests and docs)
     min_block_size=min_block_size,
     torch_executed_ops=torch_executed_ops,
     immutable_weights=False,
     reuse_cached_engines=False,
 )  # Output is a torch.fx.GraphModule
+<<<<<<< HEAD
 =======
 with torch_trt.runtime.set_runtime_backend("cpp"):
     trt_gm = torch_trt.dynamo.compile(
@@ -80,6 +88,8 @@ with torch_trt.runtime.set_runtime_backend("cpp"):
         reuse_cached_engines=False,
     )  # Output is a torch.fx.GraphModule
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+>>>>>>> 231434eae (Changed tests and docs)
 
 # Save the graph module as an exported program
 torch_trt.save(trt_gm, "./compiled.ep", inputs=inputs)

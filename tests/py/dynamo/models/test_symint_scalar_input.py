@@ -50,8 +50,7 @@ def test_symint_from_size_used_in_reshape(runtime_backend):
         "pass_through_build_failures": True,
     }
 
-    with torchtrt.runtime.set_runtime_backend(runtime_backend):
-        trt_model = torch.compile(model, backend="tensorrt", options=compile_spec)
+    trt_model = torch.compile(model, backend="tensorrt", options=compile_spec)
 
     output_ref = model(x, targets)
     output_trt = trt_model(x, targets)
@@ -87,8 +86,7 @@ def test_scalar_tensor_input(runtime_backend):
         "pass_through_build_failures": True,
     }
 
-    with torchtrt.runtime.set_runtime_backend(runtime_backend):
-        trt_model = torch.compile(model, backend="tensorrt", options=compile_spec)
+    trt_model = torch.compile(model, backend="tensorrt", options=compile_spec)
 
     output_ref = model(x, offset)
     output_trt = trt_model(x, offset)
@@ -140,8 +138,7 @@ def test_symint_with_index_and_reshape(runtime_backend):
         "pass_through_build_failures": True,
     }
 
-    with torchtrt.runtime.set_runtime_backend(runtime_backend):
-        trt_model = torch.compile(model, backend="tensorrt", options=compile_spec)
+    trt_model = torch.compile(model, backend="tensorrt", options=compile_spec)
 
     output_ref = model(x, targets, cache_length)
     output_trt = trt_model(x, targets, cache_length)
@@ -181,8 +178,7 @@ def test_symint_with_different_batch_sizes(runtime_backend):
         "pass_through_build_failures": True,
     }
 
-    with torchtrt.runtime.set_runtime_backend(runtime_backend):
-        trt_model = torch.compile(model, backend="tensorrt", options=compile_spec)
+    trt_model = torch.compile(model, backend="tensorrt", options=compile_spec)
 
     for batch_size in [4, 8, 16]:
         x_test = torch.randn(batch_size, 64).cuda()
