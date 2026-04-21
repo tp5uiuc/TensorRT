@@ -1,4 +1,6 @@
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 
 #include <cuda_runtime.h>
 #include "NvInfer.h"
@@ -62,7 +64,10 @@ TRTEngine::TRTEngine(
     bool hardware_compatible,
     bool requires_output_allocator,
     const std::string& serialized_metadata,
-    const ResourceAllocationStrategy resource_allocation_strategy)
+    const ResourceAllocationStrategy resource_allocation_strategy,
+    const std::string& runtime_cache_path,
+    int dynamic_shapes_kernel_strategy,
+    int cuda_graph_strategy)
     : TRTEngine(
           "deserialized_trt",
           serialized_engine,
@@ -73,7 +78,10 @@ TRTEngine::TRTEngine(
           hardware_compatible,
           requires_output_allocator,
           serialized_metadata,
-          resource_allocation_strategy) {}
+          resource_allocation_strategy,
+          runtime_cache_path,
+          dynamic_shapes_kernel_strategy,
+          cuda_graph_strategy) {}
 
 TRTEngine::TRTEngine(std::vector<std::string> serialized_info)
     : TRTEngine(
@@ -88,7 +96,10 @@ TRTEngine::TRTEngine(std::vector<std::string> serialized_info)
           serialized_info[SERIALIZED_METADATA_IDX],
           (static_cast<bool>(std::stoi(serialized_info[RESOURCE_ALLOCATION_STRATEGY_IDX]))
                ? ResourceAllocationStrategy::kDynamic
-               : ResourceAllocationStrategy::kStatic)) {}
+               : ResourceAllocationStrategy::kStatic),
+          serialized_info[RUNTIME_CACHE_PATH_IDX],
+          std::stoi(serialized_info[DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX]),
+          std::stoi(serialized_info[CUDA_GRAPH_STRATEGY_IDX])) {}
 
 TRTEngine::TRTEngine(
     const std::string& mod_name,
@@ -100,7 +111,20 @@ TRTEngine::TRTEngine(
     bool hardware_compatible,
     bool requires_output_allocator,
     const std::string& serialized_metadata,
-    const ResourceAllocationStrategy resource_allocation_strategy) {
+    const ResourceAllocationStrategy resource_allocation_strategy,
+    const std::string& runtime_cache_path,
+    int dynamic_shapes_kernel_strategy,
+    int cuda_graph_strategy) {
+  this->runtime_cache_path = runtime_cache_path;
+  TORCHTRT_CHECK(
+      dynamic_shapes_kernel_strategy >= 0 && dynamic_shapes_kernel_strategy <= 2,
+      "Invalid dynamic_shapes_kernel_strategy: " << dynamic_shapes_kernel_strategy
+                                                 << ". Expected 0 (lazy), 1 (eager), or 2 (none).");
+  this->dynamic_shapes_kernel_strategy = dynamic_shapes_kernel_strategy;
+  TORCHTRT_CHECK(
+      cuda_graph_strategy >= 0 && cuda_graph_strategy <= 1,
+      "Invalid cuda_graph_strategy: " << cuda_graph_strategy << ". Expected 0 (disabled) or 1 (whole_graph_capture).");
+  this->cuda_graph_strategy = cuda_graph_strategy;
   TORCHTRT_CHECK(
       is_supported_on_current_platform(target_platform),
       "This engine was not built to run on this platform (built for: " << target_platform << ", current platform: "
@@ -134,13 +158,7 @@ TRTEngine::TRTEngine(
   LOG_DEBUG(
       "Resource allocation strategy: "
       << (this->resource_allocation_strategy == ResourceAllocationStrategy::kDynamic ? "Dynamic" : "Static"));
-  if (this->resource_allocation_strategy == ResourceAllocationStrategy::kDynamic) {
-    this->exec_ctx =
-        make_trt(cuda_engine->createExecutionContext(nvinfer1::ExecutionContextAllocationStrategy::kUSER_MANAGED));
-  } else {
-    this->exec_ctx = make_trt(cuda_engine->createExecutionContext());
-  }
-  TORCHTRT_CHECK((exec_ctx.get() != nullptr), "Unable to create TensorRT execution context");
+  recreate_execution_context();
 
   // Pre-allocate placeholder for empty tensors (TensorRT requires non-null addresses)
   cudaMalloc(&empty_tensor_placeholder, 1);
@@ -278,8 +296,7 @@ void TRTEngine::disable_profiling() {
   torch::cuda::synchronize(device_info.id);
   profile_execution = false;
   trt_engine_profiler.reset();
-  exec_ctx = make_trt(cuda_engine->createExecutionContext());
-  TORCHTRT_CHECK((exec_ctx.get() != nullptr), "Unable to recreate TensorRT execution context");
+  recreate_execution_context();
 }
 
 void TRTEngine::dump_engine_layer_info_to_file(const std::string& path) {
@@ -376,10 +393,7 @@ bool TRTEngine::set_device_memory_budget(int64_t budget) {
     trt_engine_profiler.reset();
   }
   bool result = cuda_engine->setWeightStreamingBudgetV2(budget);
-  exec_ctx = make_trt(cuda_engine->createExecutionContext());
-  TORCHTRT_CHECK(
-      (exec_ctx.get() != nullptr),
-      "Unable to recreate TensorRT execution context after setting new device memory budget");
+  recreate_execution_context();
   if (profile_execution) {
     enable_profiling();
   }
@@ -428,6 +442,11 @@ std::string TRTEngine::to_str() const {
   ss << "  Hardware Compatibility: " << (hardware_compatible ? "Enabled" : "Disabled") << std::endl;
   ss << "  Target Platform: " << target_platform << std::endl;
   ss << "  Resource Allocation Strategy: " << (resource_allocation_strategy == ResourceAllocationStrategy::kDynamic ? "Dynamic" : "Static") << std::endl;
+  ss << "  Runtime Cache Path: " << (runtime_cache_path.empty() ? "<disabled>" : runtime_cache_path) << std::endl;
+  ss << "  Dynamic Shapes Kernel Strategy: " << dynamic_shapes_kernel_strategy
+     << " (0=lazy, 1=eager, 2=none)" << std::endl;
+  ss << "  CUDA Graph Strategy: " << cuda_graph_strategy
+     << " (0=disabled, 1=whole_graph_capture)" << std::endl;
   // clang-format on
   return ss.str();
 }
@@ -472,7 +491,10 @@ FlattenedState TRTEngine::__obj_flatten__() {
       std::tuple("serialized_metadata", serialized_info[SERIALIZED_METADATA_IDX]),
       std::tuple("requires_output_allocator", serialized_info[REQUIRES_OUTPUT_ALLOCATOR_IDX]),
       std::tuple("target_platform", serialized_info[TARGET_PLATFORM_IDX]),
-      std::tuple("resource_allocation_strategy", serialized_info[RESOURCE_ALLOCATION_STRATEGY_IDX]));
+      std::tuple("resource_allocation_strategy", serialized_info[RESOURCE_ALLOCATION_STRATEGY_IDX]),
+      std::tuple("runtime_cache_path", serialized_info[RUNTIME_CACHE_PATH_IDX]),
+      std::tuple("dynamic_shapes_kernel_strategy", serialized_info[DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX]),
+      std::tuple("cuda_graph_strategy", serialized_info[CUDA_GRAPH_STRATEGY_IDX]));
 }
 
 std::vector<std::string> TRTEngine::serialize() {
@@ -497,6 +519,9 @@ std::vector<std::string> TRTEngine::serialize() {
   serialized_info[TARGET_PLATFORM_IDX] = this->target_platform.serialize();
   serialized_info[RESOURCE_ALLOCATION_STRATEGY_IDX] =
       this->resource_allocation_strategy == ResourceAllocationStrategy::kDynamic ? "1" : "0";
+  serialized_info[RUNTIME_CACHE_PATH_IDX] = this->runtime_cache_path;
+  serialized_info[DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX] = std::to_string(this->dynamic_shapes_kernel_strategy);
+  serialized_info[CUDA_GRAPH_STRATEGY_IDX] = std::to_string(this->cuda_graph_strategy);
 
   return serialized_info;
 }
@@ -508,16 +533,52 @@ void TRTEngine::reset_captured_graph() {
 void TRTEngine::set_resource_allocation_strategy(TRTEngine::ResourceAllocationStrategy new_strategy) {
   if (new_strategy != this->resource_allocation_strategy) {
     this->resource_allocation_strategy = new_strategy;
-    if (this->resource_allocation_strategy == TRTEngine::ResourceAllocationStrategy::kDynamic) {
-      LOG_DEBUG("Setting resource allocation strategy to dynamic");
-      this->exec_ctx =
-          make_trt(cuda_engine->createExecutionContext(nvinfer1::ExecutionContextAllocationStrategy::kUSER_MANAGED));
-    } else {
-      LOG_DEBUG("Setting resource allocation strategy to static");
-      this->exec_ctx = make_trt(cuda_engine->createExecutionContext());
-    }
+    LOG_DEBUG(
+        "Setting resource allocation strategy to "
+        << (this->resource_allocation_strategy == TRTEngine::ResourceAllocationStrategy::kDynamic ? "dynamic"
+                                                                                                  : "static"));
+    recreate_execution_context();
   }
 }
+
+void TRTEngine::recreate_execution_context() {
+#ifdef TRT_MAJOR_RTX
+  if (!runtime_config) {
+    runtime_config = make_trt(cuda_engine->createRuntimeConfig());
+    TORCHTRT_CHECK(runtime_config.get() != nullptr, "Unable to create TensorRT IRuntimeConfig");
+    apply_runtime_cache();
+    apply_dynamic_shapes_kernel_strategy();
+    apply_cuda_graph_strategy();
+  }
+  runtime_config->setExecutionContextAllocationStrategy(
+      resource_allocation_strategy == ResourceAllocationStrategy::kDynamic
+          ? nvinfer1::ExecutionContextAllocationStrategy::kUSER_MANAGED
+          : nvinfer1::ExecutionContextAllocationStrategy::kSTATIC);
+  exec_ctx = make_trt(cuda_engine->createExecutionContext(runtime_config.get()));
+#else
+  if (resource_allocation_strategy == ResourceAllocationStrategy::kDynamic) {
+    exec_ctx =
+        make_trt(cuda_engine->createExecutionContext(nvinfer1::ExecutionContextAllocationStrategy::kUSER_MANAGED));
+  } else {
+    exec_ctx = make_trt(cuda_engine->createExecutionContext());
+  }
+#endif
+  TORCHTRT_CHECK(exec_ctx.get() != nullptr, "Unable to (re)create TensorRT execution context");
+}
+
+#ifdef TRT_MAJOR_RTX
+void TRTEngine::apply_runtime_cache() {
+  // Body added in a follow-up commit that wires the TRT-RTX runtime cache.
+}
+
+void TRTEngine::apply_dynamic_shapes_kernel_strategy() {
+  // Body added in a follow-up commit that wires the dynamic shapes kernel specialization strategy.
+}
+
+void TRTEngine::apply_cuda_graph_strategy() {
+  // Body added in a follow-up commit that wires the TRT-RTX native CUDA graph strategy.
+}
+#endif
 
 } // namespace runtime
 } // namespace core

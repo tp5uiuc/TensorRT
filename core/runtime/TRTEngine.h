@@ -30,7 +30,10 @@ using FlattenedState = std::tuple<
     std::tuple<std::string, std::string>, // requires_output_allocator
     std::tuple<std::string, std::string>, // serialized metadata
     std::tuple<std::string, std::string>, // Platform
-    std::tuple<std::string, std::string>>; // Resource Allocation Strategy
+    std::tuple<std::string, std::string>, // Resource Allocation Strategy
+    std::tuple<std::string, std::string>, // Runtime Cache Path (TRT-RTX)
+    std::tuple<std::string, std::string>, // Dynamic Shapes Kernel Specialization Strategy (TRT-RTX)
+    std::tuple<std::string, std::string>>; // CUDA Graph Strategy (TRT-RTX)
 
 struct TorchTRTRuntimeStates {
   // Indicates whether CUDAGraphs were enabled in the previous execute_engine
@@ -134,7 +137,10 @@ struct TRTEngine : torch::CustomClassHolder {
       bool requires_output_allocator = false,
       const std::string& serialized_metadata = "",
       const TRTEngine::ResourceAllocationStrategy resource_allocation_strategy =
-          TRTEngine::ResourceAllocationStrategy::kStatic);
+          TRTEngine::ResourceAllocationStrategy::kStatic,
+      const std::string& runtime_cache_path = "",
+      int dynamic_shapes_kernel_strategy = 0,
+      int cuda_graph_strategy = 0);
 
   TRTEngine(std::vector<std::string> serialized_info);
 
@@ -149,7 +155,10 @@ struct TRTEngine : torch::CustomClassHolder {
       bool requires_output_allocator = false,
       const std::string& serialized_metadata = "",
       const TRTEngine::ResourceAllocationStrategy resource_allocation_strategy =
-          TRTEngine::ResourceAllocationStrategy::kStatic);
+          TRTEngine::ResourceAllocationStrategy::kStatic,
+      const std::string& runtime_cache_path = "",
+      int dynamic_shapes_kernel_strategy = 0,
+      int cuda_graph_strategy = 0);
 
   TRTEngine& operator=(const TRTEngine& other);
   std::string to_str() const;
@@ -217,6 +226,32 @@ struct TRTEngine : torch::CustomClassHolder {
   ResourceAllocationStrategy resource_allocation_strategy = kStatic;
   void set_resource_allocation_strategy(ResourceAllocationStrategy new_strategy);
   ResourceAllocationStrategy get_resource_allocation_strategy();
+
+  // TRT-RTX runtime config state. The plain fields are stored unconditionally so that
+  // serialization remains ABI-stable on non-RTX builds; the IRuntimeConfig / IRuntimeCache
+  // handles themselves only exist on RTX.
+  std::string runtime_cache_path = "";
+  int dynamic_shapes_kernel_strategy = 0; // 0=lazy, 1=eager, 2=none
+  int cuda_graph_strategy = 0; // 0=disabled, 1=whole_graph_capture
+
+#ifdef TRT_MAJOR_RTX
+  std::shared_ptr<nvinfer1::IRuntimeConfig> runtime_config;
+  std::shared_ptr<nvinfer1::IRuntimeCache> runtime_cache;
+#endif
+
+ private:
+  // Single entry point that (re)creates exec_ctx. On RTX builds this also creates / reuses
+  // the IRuntimeConfig and applies all runtime config settings.
+  void recreate_execution_context();
+
+#ifdef TRT_MAJOR_RTX
+  // Per-feature appliers invoked the first time recreate_execution_context() runs. Bodies
+  // are provided in follow-up commits that introduce each feature; keeping the declarations
+  // here lets the scaffolding land without behavior changes.
+  void apply_runtime_cache();
+  void apply_dynamic_shapes_kernel_strategy();
+  void apply_cuda_graph_strategy();
+#endif
 };
 
 } // namespace runtime
