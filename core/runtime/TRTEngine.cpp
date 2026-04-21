@@ -12,6 +12,12 @@
 #include "core/util/prelude.h"
 #include "torch/torch.h"
 
+#if defined(TRT_MAJOR_RTX) && !defined(_WIN32)
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
+#endif
+
 namespace torch_tensorrt {
 namespace core {
 namespace runtime {
@@ -283,6 +289,11 @@ TRTEngine::TRTEngine(
 
 TRTEngine::~TRTEngine() {
   torch::cuda::synchronize(device_info.id);
+#ifdef TRT_MAJOR_RTX
+  save_runtime_cache();
+  runtime_cache.reset();
+  runtime_config.reset();
+#endif
   trt_engine_profiler.reset();
   exec_ctx.reset();
   cuda_engine.reset();
@@ -568,7 +579,23 @@ void TRTEngine::recreate_execution_context() {
 
 #ifdef TRT_MAJOR_RTX
 void TRTEngine::apply_runtime_cache() {
-  // Body added in a follow-up commit that wires the TRT-RTX runtime cache.
+  if (runtime_cache_path.empty()) {
+    LOG_DEBUG("Runtime cache disabled (no path configured).");
+    return;
+  }
+  runtime_cache = make_trt(runtime_config->createRuntimeCache());
+  if (runtime_cache.get() == nullptr) {
+    LOG_WARNING("Failed to create TensorRT IRuntimeCache; runtime cache will be skipped.");
+    return;
+  }
+  load_runtime_cache();
+  bool ok = runtime_config->setRuntimeCache(*runtime_cache);
+  if (!ok) {
+    LOG_WARNING("Failed to attach runtime cache to IRuntimeConfig; cache will be unused.");
+    runtime_cache.reset();
+    return;
+  }
+  LOG_DEBUG("TensorRT-RTX runtime cache configured at " << runtime_cache_path);
 }
 
 void TRTEngine::apply_dynamic_shapes_kernel_strategy() {
@@ -578,7 +605,96 @@ void TRTEngine::apply_dynamic_shapes_kernel_strategy() {
 void TRTEngine::apply_cuda_graph_strategy() {
   // Body added in a follow-up commit that wires the TRT-RTX native CUDA graph strategy.
 }
+
+void TRTEngine::load_runtime_cache() {
+  if (runtime_cache == nullptr || runtime_cache_path.empty()) {
+    return;
+  }
+  if (!std::filesystem::exists(runtime_cache_path)) {
+    LOG_DEBUG("No existing runtime cache at " << runtime_cache_path);
+    return;
+  }
+#ifndef _WIN32
+  int fd = ::open(runtime_cache_path.c_str(), O_RDONLY);
+  if (fd < 0) {
+    LOG_WARNING("Failed to open runtime cache for reading: " << runtime_cache_path);
+    return;
+  }
+  if (::flock(fd, LOCK_SH) != 0) {
+    LOG_WARNING("Failed to acquire shared lock on runtime cache; skipping load.");
+    ::close(fd);
+    return;
+  }
 #endif
+  try {
+    std::ifstream f(runtime_cache_path, std::ios::binary);
+    std::vector<char> buf((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    if (!buf.empty()) {
+      bool ok = runtime_cache->deserialize(buf.data(), buf.size());
+      if (ok) {
+        LOG_INFO("Loaded runtime cache from " << runtime_cache_path << " (" << buf.size() << " bytes)");
+      } else {
+        LOG_WARNING("runtime_cache->deserialize returned false for " << runtime_cache_path);
+      }
+    }
+  } catch (const std::exception& e) {
+    LOG_WARNING("Failed to load runtime cache: " << e.what());
+  }
+#ifndef _WIN32
+  ::flock(fd, LOCK_UN);
+  ::close(fd);
+#endif
+}
+
+void TRTEngine::save_runtime_cache() {
+  if (runtime_cache == nullptr || runtime_cache_path.empty()) {
+    return;
+  }
+  auto host_mem = make_trt(runtime_cache->serialize());
+  if (host_mem.get() == nullptr || host_mem->size() == 0) {
+    return;
+  }
+  try {
+    std::filesystem::path path(runtime_cache_path);
+    if (path.has_parent_path()) {
+      std::filesystem::create_directories(path.parent_path());
+    }
+    std::filesystem::path tmp_path = path;
+    tmp_path += ".tmp";
+
+#ifndef _WIN32
+    int fd = ::open(tmp_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
+      LOG_WARNING("Failed to open runtime cache tmp file for writing: " << tmp_path.string());
+      return;
+    }
+    if (::flock(fd, LOCK_EX) != 0) {
+      LOG_WARNING("Failed to acquire exclusive lock on runtime cache tmp file; skipping save.");
+      ::close(fd);
+      return;
+    }
+    ssize_t written = ::write(fd, host_mem->data(), host_mem->size());
+    ::flock(fd, LOCK_UN);
+    ::close(fd);
+    if (written != static_cast<ssize_t>(host_mem->size())) {
+      LOG_WARNING("Short write when saving runtime cache to " << tmp_path.string());
+      return;
+    }
+#else
+    // Windows: best-effort write without a cross-process lock. Follow-up: LockFileEx.
+    {
+      std::ofstream out(tmp_path, std::ios::binary);
+      out.write(reinterpret_cast<const char*>(host_mem->data()), host_mem->size());
+    }
+    LOG_WARNING("Runtime cache save on Windows runs without advisory locking; concurrent writers may race.");
+#endif
+    std::filesystem::rename(tmp_path, path);
+    LOG_INFO("Saved runtime cache to " << runtime_cache_path << " (" << host_mem->size() << " bytes)");
+  } catch (const std::exception& e) {
+    LOG_WARNING("Failed to save runtime cache: " << e.what());
+  }
+}
+#endif // TRT_MAJOR_RTX
 
 } // namespace runtime
 } // namespace core

@@ -251,6 +251,11 @@ struct TRTEngine : torch::CustomClassHolder {
   void apply_runtime_cache();
   void apply_dynamic_shapes_kernel_strategy();
   void apply_cuda_graph_strategy();
+
+  // Runtime cache persistence (RTX-only). Load is invoked from apply_runtime_cache(); save
+  // is invoked from the destructor before exec_ctx / runtime_config tear down.
+  void load_runtime_cache();
+  void save_runtime_cache();
 #endif
 };
 
