@@ -233,11 +233,23 @@ struct TRTEngine : torch::CustomClassHolder {
   std::string runtime_cache_path = "";
   int dynamic_shapes_kernel_strategy = 0; // 0=lazy, 1=eager, 2=none
   int cuda_graph_strategy = 0; // 0=disabled, 1=whole_graph_capture
+  // One-shot flag: set the first time execute_engine detects an outer stream capture around
+  // this engine, at which point its TRT-RTX native CUDA graph capture is turned off so the
+  // two do not fight. The flag stays set for the remainder of the engine's lifetime.
+  bool rtx_native_cudagraphs_disabled = false;
 
 #ifdef TRT_MAJOR_RTX
   std::shared_ptr<nvinfer1::IRuntimeConfig> runtime_config;
   std::shared_ptr<nvinfer1::IRuntimeCache> runtime_cache;
 #endif
+
+  // Monolithic-capturability check used when this engine is wrapped by an outer whole-graph
+  // capture (e.g. CudaGraphsTorchTensorRTModule). Non-RTX builds always return true.
+  bool is_monolithic_capturable(cudaStream_t stream) const;
+
+  // Disable TRT-RTX native CUDA graph capture on this engine (one-shot, invoked when an
+  // outer stream capture is detected around execute_engine). No-op on non-RTX.
+  void disable_rtx_native_cudagraphs();
 
  private:
   // Single entry point that (re)creates exec_ctx. On RTX builds this also creates / reuses

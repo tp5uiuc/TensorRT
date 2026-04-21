@@ -217,11 +217,29 @@ std::vector<at::Tensor> execute_engine(std::vector<at::Tensor> inputs, c10::intr
 
   auto run_standard_execution = [&]() {
     bool cudagraphs_enabled = (CUDAGRAPHS_MODE == SUBGRAPH_CUDAGRAPHS);
+    // effective_cudagraphs controls the manual at::cuda::CUDAGraph path below. On TRT-RTX
+    // builds we bypass that path whenever the engine has a cuda_graph_strategy set or the
+    // outer runtime has requested subgraph cudagraphs - the TRT-RTX runtime handles capture
+    // and replay internally inside enqueueV3. If an outer stream capture is already in
+    // progress (e.g. the caller wraps this module in CudaGraphsTorchTensorRTModule for
+    // whole-graph capture), RTX-native capture would conflict, so we disable it one-shot.
+    bool effective_cudagraphs = cudagraphs_enabled;
+#ifdef TRT_MAJOR_RTX
+    if (compiled_engine->cuda_graph_strategy != 0 || cudagraphs_enabled) {
+      effective_cudagraphs = false;
+      cudaStreamCaptureStatus capture_status;
+      cudaStreamIsCapturing(compiled_engine->engine_stream.stream(), &capture_status);
+      if (capture_status != cudaStreamCaptureStatusNone) {
+        compiled_engine->disable_rtx_native_cudagraphs();
+      }
+    }
+#endif
+
     bool shape_changed = _validate_shapes(inputs, compiled_engine);
 
     // Whether cudagraphs needs to record the graph on this pass
     auto result = compiled_engine->runtime_states.set_runtime_states(
-        cudagraphs_enabled, compiled_engine->use_pre_allocated_outputs, shape_changed);
+        effective_cudagraphs, compiled_engine->use_pre_allocated_outputs, shape_changed);
 
     bool need_cudagraphs_record = std::get<0>(result);
     bool can_use_pre_allocated_outputs = std::get<1>(result);
@@ -244,7 +262,8 @@ std::vector<at::Tensor> execute_engine(std::vector<at::Tensor> inputs, c10::intr
             std::make_unique<torch::autograd::profiler::RecordProfile>(compiled_engine->input_profile_path);
       }
 
-      setup_input_tensors(inputs, compiled_engine, cudagraphs_enabled, need_cudagraphs_record, inputShapeTensorValues);
+      setup_input_tensors(
+          inputs, compiled_engine, effective_cudagraphs, need_cudagraphs_record, inputShapeTensorValues);
       // Check if input shapes can be inferred.
       int32_t const io_size{compiled_engine->cuda_engine->getNbIOTensors()};
       std::vector<char const*> names(io_size);
@@ -276,7 +295,7 @@ std::vector<at::Tensor> execute_engine(std::vector<at::Tensor> inputs, c10::intr
           compiled_engine->output_buffers[pyt_idx] = std::move(outputs[pyt_idx].clone());
         }
 
-        if (cudagraphs_enabled) {
+        if (effective_cudagraphs) {
           TORCHTRT_CHECK(
               compiled_engine->exec_ctx->setTensorAddress(
                   name.c_str(), compiled_engine->output_buffers[pyt_idx].data_ptr()),
@@ -316,8 +335,10 @@ std::vector<at::Tensor> execute_engine(std::vector<at::Tensor> inputs, c10::intr
       caller_exec_complete.record(compiled_engine->caller_stream);
       caller_exec_complete.block(compiled_engine->engine_stream);
 
-      if (!cudagraphs_enabled) {
-        // Direct execution uses the caller buffers directly
+      if (!effective_cudagraphs) {
+        // Direct execution uses the caller buffers directly. On TRT-RTX with a
+        // cuda_graph_strategy set, the engine captures/replays internally during
+        // this enqueueV3 call.
         compiled_engine->exec_ctx->enqueueV3(compiled_engine->engine_stream);
       } else {
         if (need_cudagraphs_record) {
@@ -350,7 +371,7 @@ std::vector<at::Tensor> execute_engine(std::vector<at::Tensor> inputs, c10::intr
     trt_exec_complete.record(compiled_engine->engine_stream);
     trt_exec_complete.block(compiled_engine->caller_stream);
 
-    if (cudagraphs_enabled) {
+    if (effective_cudagraphs) {
       // If in CUDAGraph mode, results need to be copied to the result buffers (on caller stream)
       for (size_t o = 0; o < compiled_engine->output_buffers.size(); o++) {
         outputs[o].copy_(compiled_engine->output_buffers[o], false);

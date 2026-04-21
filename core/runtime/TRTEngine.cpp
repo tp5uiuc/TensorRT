@@ -552,6 +552,33 @@ void TRTEngine::set_resource_allocation_strategy(TRTEngine::ResourceAllocationSt
   }
 }
 
+bool TRTEngine::is_monolithic_capturable(cudaStream_t stream) const {
+#if defined(TRT_MAJOR_RTX) && defined(ENABLE_FEATURE_DISABLE_RUNTIME_ALLOCATION)
+  // "lazy" strategy (0) swaps specialized kernels in mid-run, which would invalidate a
+  // captured graph. Any other strategy (eager/none) combined with a capturable stream is
+  // safe for outer monolithic capture.
+  return exec_ctx->isStreamCapturable(stream) && dynamic_shapes_kernel_strategy != 0;
+#else
+  (void)stream;
+  return true;
+#endif
+}
+
+void TRTEngine::disable_rtx_native_cudagraphs() {
+#ifdef TRT_MAJOR_RTX
+  if (rtx_native_cudagraphs_disabled || cuda_graph_strategy == 0) {
+    return;
+  }
+  LOG_WARNING(
+      "Outer CUDA stream capture detected; disabling TRT-RTX native CUDA graph strategy on engine "
+      << name << " for the remainder of its lifetime.");
+  cuda_graph_strategy = 0;
+  apply_cuda_graph_strategy();
+  recreate_execution_context();
+  rtx_native_cudagraphs_disabled = true;
+#endif
+}
+
 void TRTEngine::recreate_execution_context() {
 #ifdef TRT_MAJOR_RTX
   if (!runtime_config) {
@@ -605,7 +632,12 @@ void TRTEngine::apply_dynamic_shapes_kernel_strategy() {
 }
 
 void TRTEngine::apply_cuda_graph_strategy() {
-  // Body added in a follow-up commit that wires the TRT-RTX native CUDA graph strategy.
+  bool ok = runtime_config->setCudaGraphStrategy(
+      cuda_graph_strategy == 1 ? nvinfer1::CudaGraphStrategy::kWHOLE_GRAPH_CAPTURE
+                               : nvinfer1::CudaGraphStrategy::kDISABLED);
+  if (!ok) {
+    LOG_WARNING("Failed to set CUDA graph strategy; continuing with default.");
+  }
 }
 
 void TRTEngine::load_runtime_cache() {
