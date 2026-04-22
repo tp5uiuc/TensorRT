@@ -150,9 +150,11 @@ TORCH_LIBRARY(tensorrt, m) {
   m.def("REQUIRES_OUTPUT_ALLOCATOR_IDX", []() -> int64_t { return REQUIRES_OUTPUT_ALLOCATOR_IDX; });
   m.def("SERIALIZATION_LEN", []() -> int64_t { return SERIALIZATION_LEN; });
   m.def("RESOURCE_ALLOCATION_STRATEGY_IDX", []() -> int64_t { return RESOURCE_ALLOCATION_STRATEGY_IDX; });
+#ifdef TRT_MAJOR_RTX
   m.def("RUNTIME_CACHE_PATH_IDX", []() -> int64_t { return RUNTIME_CACHE_PATH_IDX; });
   m.def("DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX", []() -> int64_t { return DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX; });
   m.def("CUDA_GRAPH_STRATEGY_IDX", []() -> int64_t { return CUDA_GRAPH_STRATEGY_IDX; });
+#endif
   m.def("_platform_linux_x86_64", []() -> std::string {
     auto it = get_platform_name_map().find(Platform::PlatformEnum::kLINUX_X86_64);
     return it->second;

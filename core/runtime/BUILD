@@ -1,6 +1,7 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
 load("@rules_pkg//:pkg.bzl", "pkg_tar")
 load("@rules_pkg//pkg:mappings.bzl", "pkg_files")
+
 package(default_visibility = ["//visibility:public"])
 
 config_setting(
@@ -66,6 +67,7 @@ cc_library(
         "RTDevice.cpp",
         "TRTEngine.cpp",
         "TRTEngineProfiler.cpp",
+        "TRTRuntimeConfig.cpp",
         "execute_engine.cpp",
         "register_jit_hooks.cpp",
         "runtime.cpp",
@@ -75,6 +77,7 @@ cc_library(
         "RTDevice.h",
         "TRTEngine.h",
         "TRTEngineProfiler.h",
+        "TRTRuntimeConfig.h",
         "runtime.h",
     ],
     linkopts = [
@@ -107,6 +110,7 @@ filegroup(
         "RTDevice.h",
         "TRTEngine.h",
         "TRTEngineProfiler.h",
+        "TRTRuntimeConfig.h",
         "runtime.h",
     ],
     visibility = ["//visibility:public"],
@@ -121,6 +125,6 @@ pkg_tar(
 pkg_files(
     name = "include_pkg_files",
     srcs = [":include_files"],
-    visibility = ["//visibility:public"],
     prefix = "include/torch_tensorrt/core/runtime/",
+    visibility = ["//visibility:public"],
 )

@@ -218,14 +218,14 @@ std::vector<at::Tensor> execute_engine(std::vector<at::Tensor> inputs, c10::intr
   auto run_standard_execution = [&]() {
     bool cudagraphs_enabled = (CUDAGRAPHS_MODE == SUBGRAPH_CUDAGRAPHS);
     // effective_cudagraphs controls the manual at::cuda::CUDAGraph path below. On TRT-RTX
-    // builds we bypass that path whenever the engine has a cuda_graph_strategy set or the
-    // outer runtime has requested subgraph cudagraphs - the TRT-RTX runtime handles capture
-    // and replay internally inside enqueueV3. If an outer stream capture is already in
-    // progress (e.g. the caller wraps this module in CudaGraphsTorchTensorRTModule for
-    // whole-graph capture), RTX-native capture would conflict, so we disable it one-shot.
+    // builds the engine-internal runtime owns capture/replay inside enqueueV3 whenever the
+    // engine has a cuda_graph_strategy set or subgraph cudagraphs are enabled; the struct
+    // reports that via `uses_internal_capture` so the caller skips its manual wrapper. If
+    // an outer stream capture is already in progress (e.g. the caller wraps this module in
+    // CudaGraphsTorchTensorRTModule for whole-graph capture), engine-internal capture would
+    // collide, so we disable it one-shot here.
     bool effective_cudagraphs = cudagraphs_enabled;
-#ifdef TRT_MAJOR_RTX
-    if (compiled_engine->cuda_graph_strategy != 0 || cudagraphs_enabled) {
+    if (compiled_engine->runtime_cfg.uses_internal_capture(cudagraphs_enabled)) {
       effective_cudagraphs = false;
       cudaStreamCaptureStatus capture_status;
       cudaStreamIsCapturing(compiled_engine->engine_stream.stream(), &capture_status);
@@ -233,7 +233,6 @@ std::vector<at::Tensor> execute_engine(std::vector<at::Tensor> inputs, c10::intr
         compiled_engine->disable_rtx_native_cudagraphs();
       }
     }
-#endif
 
     bool shape_changed = _validate_shapes(inputs, compiled_engine);
 

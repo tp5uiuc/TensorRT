@@ -57,12 +57,15 @@ if ENABLED_FEATURES.torch_tensorrt_runtime:
     RESOURCE_ALLOCATION_STRATEGY_IDX = (
         torch.ops.tensorrt.RESOURCE_ALLOCATION_STRATEGY_IDX()
     )  # 10
-    RUNTIME_CACHE_PATH_IDX = torch.ops.tensorrt.RUNTIME_CACHE_PATH_IDX()  # 11
-    DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX = (
-        torch.ops.tensorrt.DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX()
-    )  # 12
-    CUDA_GRAPH_STRATEGY_IDX = torch.ops.tensorrt.CUDA_GRAPH_STRATEGY_IDX()  # 13
-    SERIALIZATION_LEN = torch.ops.tensorrt.SERIALIZATION_LEN()  # 14
+    if ENABLED_FEATURES.tensorrt_rtx:
+        RUNTIME_CACHE_PATH_IDX = torch.ops.tensorrt.RUNTIME_CACHE_PATH_IDX()  # 11
+        DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX = (
+            torch.ops.tensorrt.DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX()
+        )  # 12
+        CUDA_GRAPH_STRATEGY_IDX = torch.ops.tensorrt.CUDA_GRAPH_STRATEGY_IDX()  # 13
+    SERIALIZATION_LEN = (
+        torch.ops.tensorrt.SERIALIZATION_LEN()
+    )  # 14 (RTX) / 11 (standard)
 
 _DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP: Dict[str, int] = {
     "lazy": 0,
@@ -164,11 +167,12 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
         self.engine = None
         self.requires_output_allocator = requires_output_allocator
         self.dynamically_allocate_resources = settings.dynamically_allocate_resources
-        self.runtime_cache_path = settings.runtime_cache_path
-        self.dynamic_shapes_kernel_specialization_strategy = (
-            settings.dynamic_shapes_kernel_specialization_strategy
-        )
-        self.cuda_graph_strategy = settings.cuda_graph_strategy
+        if ENABLED_FEATURES.tensorrt_rtx:
+            self.runtime_cache_path = settings.runtime_cache_path
+            self.dynamic_shapes_kernel_specialization_strategy = (
+                settings.dynamic_shapes_kernel_specialization_strategy
+            )
+            self.cuda_graph_strategy = settings.cuda_graph_strategy
         self.symbolic_shape_expressions = symbolic_shape_expressions
 
         if (
@@ -227,29 +231,30 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
         engine_info[RESOURCE_ALLOCATION_STRATEGY_IDX] = str(
             int(self.dynamically_allocate_resources)
         )
-        engine_info[RUNTIME_CACHE_PATH_IDX] = self.runtime_cache_path or ""
-        if (
-            self.dynamic_shapes_kernel_specialization_strategy
-            not in _DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP
-        ):
-            raise ValueError(
-                f"Invalid dynamic_shapes_kernel_specialization_strategy "
-                f"{self.dynamic_shapes_kernel_specialization_strategy!r}; expected one of "
-                f"{list(_DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP.keys())}"
-            )
-        engine_info[DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX] = str(
-            _DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP[
+        if ENABLED_FEATURES.tensorrt_rtx:
+            engine_info[RUNTIME_CACHE_PATH_IDX] = self.runtime_cache_path or ""
+            if (
                 self.dynamic_shapes_kernel_specialization_strategy
-            ]
-        )
-        if self.cuda_graph_strategy not in _CUDA_GRAPH_STRATEGY_MAP:
-            raise ValueError(
-                f"Invalid cuda_graph_strategy {self.cuda_graph_strategy!r}; expected one of "
-                f"{list(_CUDA_GRAPH_STRATEGY_MAP.keys())}"
+                not in _DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP
+            ):
+                raise ValueError(
+                    f"Invalid dynamic_shapes_kernel_specialization_strategy "
+                    f"{self.dynamic_shapes_kernel_specialization_strategy!r}; expected one of "
+                    f"{list(_DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP.keys())}"
+                )
+            engine_info[DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX] = str(
+                _DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP[
+                    self.dynamic_shapes_kernel_specialization_strategy
+                ]
             )
-        engine_info[CUDA_GRAPH_STRATEGY_IDX] = str(
-            _CUDA_GRAPH_STRATEGY_MAP[self.cuda_graph_strategy]
-        )
+            if self.cuda_graph_strategy not in _CUDA_GRAPH_STRATEGY_MAP:
+                raise ValueError(
+                    f"Invalid cuda_graph_strategy {self.cuda_graph_strategy!r}; expected one of "
+                    f"{list(_CUDA_GRAPH_STRATEGY_MAP.keys())}"
+                )
+            engine_info[CUDA_GRAPH_STRATEGY_IDX] = str(
+                _CUDA_GRAPH_STRATEGY_MAP[self.cuda_graph_strategy]
+            )
 
         return engine_info
 

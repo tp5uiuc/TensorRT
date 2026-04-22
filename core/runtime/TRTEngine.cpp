@@ -1,6 +1,5 @@
 #include <algorithm>
 #include <filesystem>
-#include <fstream>
 
 #include <cuda_runtime.h>
 #include "NvInfer.h"
@@ -11,12 +10,6 @@
 #include "core/runtime/runtime.h"
 #include "core/util/prelude.h"
 #include "torch/torch.h"
-
-#if defined(TRT_MAJOR_RTX) && !defined(_WIN32)
-#include <fcntl.h>
-#include <sys/file.h>
-#include <unistd.h>
-#endif
 
 namespace torch_tensorrt {
 namespace core {
@@ -102,10 +95,15 @@ TRTEngine::TRTEngine(std::vector<std::string> serialized_info)
           serialized_info[SERIALIZED_METADATA_IDX],
           (static_cast<bool>(std::stoi(serialized_info[RESOURCE_ALLOCATION_STRATEGY_IDX]))
                ? ResourceAllocationStrategy::kDynamic
-               : ResourceAllocationStrategy::kStatic),
+               : ResourceAllocationStrategy::kStatic)
+#ifdef TRT_MAJOR_RTX
+              ,
           serialized_info[RUNTIME_CACHE_PATH_IDX],
           std::stoi(serialized_info[DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX]),
-          std::stoi(serialized_info[CUDA_GRAPH_STRATEGY_IDX])) {}
+          std::stoi(serialized_info[CUDA_GRAPH_STRATEGY_IDX])
+#endif
+      ) {
+}
 
 TRTEngine::TRTEngine(
     const std::string& mod_name,
@@ -121,16 +119,9 @@ TRTEngine::TRTEngine(
     const std::string& runtime_cache_path,
     int dynamic_shapes_kernel_strategy,
     int cuda_graph_strategy) {
-  this->runtime_cache_path = runtime_cache_path;
-  TORCHTRT_CHECK(
-      dynamic_shapes_kernel_strategy >= 0 && dynamic_shapes_kernel_strategy <= 2,
-      "Invalid dynamic_shapes_kernel_strategy: " << dynamic_shapes_kernel_strategy
-                                                 << ". Expected 0 (lazy), 1 (eager), or 2 (none).");
-  this->dynamic_shapes_kernel_strategy = dynamic_shapes_kernel_strategy;
-  TORCHTRT_CHECK(
-      cuda_graph_strategy >= 0 && cuda_graph_strategy <= 1,
-      "Invalid cuda_graph_strategy: " << cuda_graph_strategy << ". Expected 0 (disabled) or 1 (whole_graph_capture).");
-  this->cuda_graph_strategy = cuda_graph_strategy;
+  runtime_cfg.runtime_cache_path = runtime_cache_path;
+  runtime_cfg.dynamic_shapes_kernel_strategy = to_dynamic_shapes_kernel_strategy(dynamic_shapes_kernel_strategy);
+  runtime_cfg.cuda_graph_strategy = to_cuda_graph_strategy_option(cuda_graph_strategy);
   TORCHTRT_CHECK(
       is_supported_on_current_platform(target_platform),
       "This engine was not built to run on this platform (built for: " << target_platform << ", current platform: "
@@ -288,12 +279,13 @@ TRTEngine::TRTEngine(
 }
 
 TRTEngine::~TRTEngine() {
-  torch::cuda::synchronize(device_info.id);
-#ifdef TRT_MAJOR_RTX
-  save_runtime_cache();
-  runtime_cache.reset();
-  runtime_config.reset();
-#endif
+  // Destructors must not throw; `save_runtime_cache_nothrow` is itself no-throw but we
+  // wrap it defensively to keep stack unwinding safe in all circumstances.
+  try {
+    torch::cuda::synchronize(device_info.id);
+    runtime_cfg.save_runtime_cache_nothrow();
+  } catch (...) {
+  }
   trt_engine_profiler.reset();
   exec_ctx.reset();
   cuda_engine.reset();
@@ -453,12 +445,8 @@ std::string TRTEngine::to_str() const {
   ss << "  Hardware Compatibility: " << (hardware_compatible ? "Enabled" : "Disabled") << std::endl;
   ss << "  Target Platform: " << target_platform << std::endl;
   ss << "  Resource Allocation Strategy: " << (resource_allocation_strategy == ResourceAllocationStrategy::kDynamic ? "Dynamic" : "Static") << std::endl;
-  ss << "  Runtime Cache Path: " << (runtime_cache_path.empty() ? "<disabled>" : runtime_cache_path) << std::endl;
-  ss << "  Dynamic Shapes Kernel Strategy: " << dynamic_shapes_kernel_strategy
-     << " (0=lazy, 1=eager, 2=none)" << std::endl;
-  ss << "  CUDA Graph Strategy: " << cuda_graph_strategy
-     << " (0=disabled, 1=whole_graph_capture)" << std::endl;
   // clang-format on
+  runtime_cfg.write_to_str(ss);
   return ss.str();
 }
 
@@ -502,10 +490,14 @@ FlattenedState TRTEngine::__obj_flatten__() {
       std::tuple("serialized_metadata", serialized_info[SERIALIZED_METADATA_IDX]),
       std::tuple("requires_output_allocator", serialized_info[REQUIRES_OUTPUT_ALLOCATOR_IDX]),
       std::tuple("target_platform", serialized_info[TARGET_PLATFORM_IDX]),
-      std::tuple("resource_allocation_strategy", serialized_info[RESOURCE_ALLOCATION_STRATEGY_IDX]),
+      std::tuple("resource_allocation_strategy", serialized_info[RESOURCE_ALLOCATION_STRATEGY_IDX])
+#ifdef TRT_MAJOR_RTX
+          ,
       std::tuple("runtime_cache_path", serialized_info[RUNTIME_CACHE_PATH_IDX]),
       std::tuple("dynamic_shapes_kernel_strategy", serialized_info[DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX]),
-      std::tuple("cuda_graph_strategy", serialized_info[CUDA_GRAPH_STRATEGY_IDX]));
+      std::tuple("cuda_graph_strategy", serialized_info[CUDA_GRAPH_STRATEGY_IDX])
+#endif
+  );
 }
 
 std::vector<std::string> TRTEngine::serialize() {
@@ -530,9 +522,12 @@ std::vector<std::string> TRTEngine::serialize() {
   serialized_info[TARGET_PLATFORM_IDX] = this->target_platform.serialize();
   serialized_info[RESOURCE_ALLOCATION_STRATEGY_IDX] =
       this->resource_allocation_strategy == ResourceAllocationStrategy::kDynamic ? "1" : "0";
-  serialized_info[RUNTIME_CACHE_PATH_IDX] = this->runtime_cache_path;
-  serialized_info[DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX] = std::to_string(this->dynamic_shapes_kernel_strategy);
-  serialized_info[CUDA_GRAPH_STRATEGY_IDX] = std::to_string(this->cuda_graph_strategy);
+#ifdef TRT_MAJOR_RTX
+  serialized_info[RUNTIME_CACHE_PATH_IDX] = runtime_cfg.runtime_cache_path;
+  serialized_info[DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX] =
+      std::to_string(static_cast<int>(runtime_cfg.dynamic_shapes_kernel_strategy));
+  serialized_info[CUDA_GRAPH_STRATEGY_IDX] = std::to_string(static_cast<int>(runtime_cfg.cuda_graph_strategy));
+#endif
 
   return serialized_info;
 }
@@ -553,182 +548,28 @@ void TRTEngine::set_resource_allocation_strategy(TRTEngine::ResourceAllocationSt
 }
 
 bool TRTEngine::is_monolithic_capturable(cudaStream_t stream) const {
-#if defined(TRT_MAJOR_RTX) && defined(ENABLE_FEATURE_DISABLE_RUNTIME_ALLOCATION)
-  // "lazy" strategy (0) swaps specialized kernels in mid-run, which would invalidate a
-  // captured graph. Any other strategy (eager/none) combined with a capturable stream is
-  // safe for outer monolithic capture.
-  return exec_ctx->isStreamCapturable(stream) && dynamic_shapes_kernel_strategy != 0;
-#else
-  (void)stream;
-  return true;
-#endif
+  return runtime_cfg.is_monolithic_capturable(exec_ctx.get(), stream);
 }
 
 void TRTEngine::disable_rtx_native_cudagraphs() {
-#ifdef TRT_MAJOR_RTX
-  if (rtx_native_cudagraphs_disabled || cuda_graph_strategy == 0) {
-    return;
+  bool was_disabled = runtime_cfg.rtx_native_cudagraphs_disabled;
+  runtime_cfg.disable_rtx_native_cudagraphs(name);
+  if (!was_disabled && runtime_cfg.rtx_native_cudagraphs_disabled) {
+    // The CUDA graph strategy on the IRuntimeConfig has been flipped; rebuild exec_ctx
+    // so the new strategy takes effect for subsequent enqueueV3 calls.
+    recreate_execution_context();
   }
-  LOG_WARNING(
-      "Outer CUDA stream capture detected; disabling TRT-RTX native CUDA graph strategy on engine "
-      << name << " for the remainder of its lifetime.");
-  cuda_graph_strategy = 0;
-  apply_cuda_graph_strategy();
-  recreate_execution_context();
-  rtx_native_cudagraphs_disabled = true;
-#endif
 }
 
 void TRTEngine::recreate_execution_context() {
-#ifdef TRT_MAJOR_RTX
-  if (!runtime_config) {
-    runtime_config = make_trt(cuda_engine->createRuntimeConfig());
-    TORCHTRT_CHECK(runtime_config.get() != nullptr, "Unable to create TensorRT IRuntimeConfig");
-    apply_runtime_cache();
-    apply_dynamic_shapes_kernel_strategy();
-    apply_cuda_graph_strategy();
-  }
-  runtime_config->setExecutionContextAllocationStrategy(
+  runtime_cfg.ensure_initialized(cuda_engine.get());
+  runtime_cfg.set_execution_context_allocation_strategy(
       resource_allocation_strategy == ResourceAllocationStrategy::kDynamic
           ? nvinfer1::ExecutionContextAllocationStrategy::kUSER_MANAGED
           : nvinfer1::ExecutionContextAllocationStrategy::kSTATIC);
-  exec_ctx = make_trt(cuda_engine->createExecutionContext(runtime_config.get()));
-#else
-  if (resource_allocation_strategy == ResourceAllocationStrategy::kDynamic) {
-    exec_ctx =
-        make_trt(cuda_engine->createExecutionContext(nvinfer1::ExecutionContextAllocationStrategy::kUSER_MANAGED));
-  } else {
-    exec_ctx = make_trt(cuda_engine->createExecutionContext());
-  }
-#endif
+  exec_ctx = make_trt(cuda_engine->createExecutionContext(runtime_cfg.config.get()));
   TORCHTRT_CHECK(exec_ctx.get() != nullptr, "Unable to (re)create TensorRT execution context");
 }
-
-#ifdef TRT_MAJOR_RTX
-void TRTEngine::apply_runtime_cache() {
-  if (runtime_cache_path.empty()) {
-    LOG_DEBUG("Runtime cache disabled (no path configured).");
-    return;
-  }
-  runtime_cache = make_trt(runtime_config->createRuntimeCache());
-  if (runtime_cache.get() == nullptr) {
-    LOG_WARNING("Failed to create TensorRT IRuntimeCache; runtime cache will be skipped.");
-    return;
-  }
-  load_runtime_cache();
-  bool ok = runtime_config->setRuntimeCache(*runtime_cache);
-  if (!ok) {
-    LOG_WARNING("Failed to attach runtime cache to IRuntimeConfig; cache will be unused.");
-    runtime_cache.reset();
-    return;
-  }
-  LOG_DEBUG("TensorRT-RTX runtime cache configured at " << runtime_cache_path);
-}
-
-void TRTEngine::apply_dynamic_shapes_kernel_strategy() {
-  runtime_config->setDynamicShapesKernelSpecializationStrategy(
-      static_cast<nvinfer1::DynamicShapesKernelSpecializationStrategy>(dynamic_shapes_kernel_strategy));
-  LOG_DEBUG("Dynamic shapes kernel specialization strategy set to " << dynamic_shapes_kernel_strategy);
-}
-
-void TRTEngine::apply_cuda_graph_strategy() {
-  bool ok = runtime_config->setCudaGraphStrategy(
-      cuda_graph_strategy == 1 ? nvinfer1::CudaGraphStrategy::kWHOLE_GRAPH_CAPTURE
-                               : nvinfer1::CudaGraphStrategy::kDISABLED);
-  if (!ok) {
-    LOG_WARNING("Failed to set CUDA graph strategy; continuing with default.");
-  }
-}
-
-void TRTEngine::load_runtime_cache() {
-  if (runtime_cache == nullptr || runtime_cache_path.empty()) {
-    return;
-  }
-  if (!std::filesystem::exists(runtime_cache_path)) {
-    LOG_DEBUG("No existing runtime cache at " << runtime_cache_path);
-    return;
-  }
-#ifndef _WIN32
-  int fd = ::open(runtime_cache_path.c_str(), O_RDONLY);
-  if (fd < 0) {
-    LOG_WARNING("Failed to open runtime cache for reading: " << runtime_cache_path);
-    return;
-  }
-  if (::flock(fd, LOCK_SH) != 0) {
-    LOG_WARNING("Failed to acquire shared lock on runtime cache; skipping load.");
-    ::close(fd);
-    return;
-  }
-#endif
-  try {
-    std::ifstream f(runtime_cache_path, std::ios::binary);
-    std::vector<char> buf((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-    if (!buf.empty()) {
-      bool ok = runtime_cache->deserialize(buf.data(), buf.size());
-      if (ok) {
-        LOG_INFO("Loaded runtime cache from " << runtime_cache_path << " (" << buf.size() << " bytes)");
-      } else {
-        LOG_WARNING("runtime_cache->deserialize returned false for " << runtime_cache_path);
-      }
-    }
-  } catch (const std::exception& e) {
-    LOG_WARNING("Failed to load runtime cache: " << e.what());
-  }
-#ifndef _WIN32
-  ::flock(fd, LOCK_UN);
-  ::close(fd);
-#endif
-}
-
-void TRTEngine::save_runtime_cache() {
-  if (runtime_cache == nullptr || runtime_cache_path.empty()) {
-    return;
-  }
-  auto host_mem = make_trt(runtime_cache->serialize());
-  if (host_mem.get() == nullptr || host_mem->size() == 0) {
-    return;
-  }
-  try {
-    std::filesystem::path path(runtime_cache_path);
-    if (path.has_parent_path()) {
-      std::filesystem::create_directories(path.parent_path());
-    }
-    std::filesystem::path tmp_path = path;
-    tmp_path += ".tmp";
-
-#ifndef _WIN32
-    int fd = ::open(tmp_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd < 0) {
-      LOG_WARNING("Failed to open runtime cache tmp file for writing: " << tmp_path.string());
-      return;
-    }
-    if (::flock(fd, LOCK_EX) != 0) {
-      LOG_WARNING("Failed to acquire exclusive lock on runtime cache tmp file; skipping save.");
-      ::close(fd);
-      return;
-    }
-    ssize_t written = ::write(fd, host_mem->data(), host_mem->size());
-    ::flock(fd, LOCK_UN);
-    ::close(fd);
-    if (written != static_cast<ssize_t>(host_mem->size())) {
-      LOG_WARNING("Short write when saving runtime cache to " << tmp_path.string());
-      return;
-    }
-#else
-    // Windows: best-effort write without a cross-process lock. Follow-up: LockFileEx.
-    {
-      std::ofstream out(tmp_path, std::ios::binary);
-      out.write(reinterpret_cast<const char*>(host_mem->data()), host_mem->size());
-    }
-    LOG_WARNING("Runtime cache save on Windows runs without advisory locking; concurrent writers may race.");
-#endif
-    std::filesystem::rename(tmp_path, path);
-    LOG_INFO("Saved runtime cache to " << runtime_cache_path << " (" << host_mem->size() << " bytes)");
-  } catch (const std::exception& e) {
-    LOG_WARNING("Failed to save runtime cache: " << e.what());
-  }
-}
-#endif // TRT_MAJOR_RTX
 
 } // namespace runtime
 } // namespace core

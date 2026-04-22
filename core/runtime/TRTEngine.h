@@ -13,12 +13,14 @@
 #include "torch/custom_class.h"
 
 #include "core/runtime/TRTEngineProfiler.h"
+#include "core/runtime/TRTRuntimeConfig.h"
 #include "core/util/prelude.h"
 
 namespace torch_tensorrt {
 namespace core {
 namespace runtime {
 
+#ifdef TRT_MAJOR_RTX
 using FlattenedState = std::tuple<
     std::tuple<std::string, std::string>, // ABI_VERSION
     std::tuple<std::string, std::string>, // name
@@ -34,6 +36,20 @@ using FlattenedState = std::tuple<
     std::tuple<std::string, std::string>, // Runtime Cache Path (TRT-RTX)
     std::tuple<std::string, std::string>, // Dynamic Shapes Kernel Specialization Strategy (TRT-RTX)
     std::tuple<std::string, std::string>>; // CUDA Graph Strategy (TRT-RTX)
+#else
+using FlattenedState = std::tuple<
+    std::tuple<std::string, std::string>, // ABI_VERSION
+    std::tuple<std::string, std::string>, // name
+    std::tuple<std::string, std::string>, // device
+    std::tuple<std::string, std::string>, // engine
+    std::tuple<std::string, std::string>, // input binding names
+    std::tuple<std::string, std::string>, // output binding names
+    std::tuple<std::string, std::string>, // HW compatibility
+    std::tuple<std::string, std::string>, // requires_output_allocator
+    std::tuple<std::string, std::string>, // serialized metadata
+    std::tuple<std::string, std::string>, // Platform
+    std::tuple<std::string, std::string>>; // Resource Allocation Strategy
+#endif
 
 struct TorchTRTRuntimeStates {
   // Indicates whether CUDAGraphs were enabled in the previous execute_engine
@@ -227,48 +243,23 @@ struct TRTEngine : torch::CustomClassHolder {
   void set_resource_allocation_strategy(ResourceAllocationStrategy new_strategy);
   ResourceAllocationStrategy get_resource_allocation_strategy();
 
-  // TRT-RTX runtime config state. The plain fields are stored unconditionally so that
-  // serialization remains ABI-stable on non-RTX builds; the IRuntimeConfig / IRuntimeCache
-  // handles themselves only exist on RTX.
-  std::string runtime_cache_path = "";
-  int dynamic_shapes_kernel_strategy = 0; // 0=lazy, 1=eager, 2=none
-  int cuda_graph_strategy = 0; // 0=disabled, 1=whole_graph_capture
-  // One-shot flag: set the first time execute_engine detects an outer stream capture around
-  // this engine, at which point its TRT-RTX native CUDA graph capture is turned off so the
-  // two do not fight. The flag stays set for the remainder of the engine's lifetime.
-  bool rtx_native_cudagraphs_disabled = false;
-
-#ifdef TRT_MAJOR_RTX
-  std::shared_ptr<nvinfer1::IRuntimeConfig> runtime_config;
-  std::shared_ptr<nvinfer1::IRuntimeCache> runtime_cache;
-#endif
+  // All TensorRT-RTX-specific IRuntimeConfig state lives here. On non-RTX builds this
+  // still owns a shared IRuntimeConfig (so the execution-context allocation strategy is
+  // applied via the uniform code path) but the RTX-only setters become no-ops.
+  TRTRuntimeConfig runtime_cfg;
 
   // Monolithic-capturability check used when this engine is wrapped by an outer whole-graph
   // capture (e.g. CudaGraphsTorchTensorRTModule). Non-RTX builds always return true.
   bool is_monolithic_capturable(cudaStream_t stream) const;
 
-  // Disable TRT-RTX native CUDA graph capture on this engine (one-shot, invoked when an
-  // outer stream capture is detected around execute_engine). No-op on non-RTX.
+  // Disable TensorRT-RTX native CUDA graph capture on this engine (one-shot, invoked when
+  // an outer stream capture is detected around execute_engine). No-op on non-RTX.
   void disable_rtx_native_cudagraphs();
 
  private:
-  // Single entry point that (re)creates exec_ctx. On RTX builds this also creates / reuses
-  // the IRuntimeConfig and applies all runtime config settings.
+  // Single entry point that (re)creates exec_ctx. Also creates (once) the IRuntimeConfig
+  // owned by runtime_cfg and applies all runtime config settings.
   void recreate_execution_context();
-
-#ifdef TRT_MAJOR_RTX
-  // Per-feature appliers invoked the first time recreate_execution_context() runs. Bodies
-  // are provided in follow-up commits that introduce each feature; keeping the declarations
-  // here lets the scaffolding land without behavior changes.
-  void apply_runtime_cache();
-  void apply_dynamic_shapes_kernel_strategy();
-  void apply_cuda_graph_strategy();
-
-  // Runtime cache persistence (RTX-only). Load is invoked from apply_runtime_cache(); save
-  // is invoked from the destructor before exec_ctx / runtime_config tear down.
-  void load_runtime_cache();
-  void save_runtime_cache();
-#endif
 };
 
 } // namespace runtime
