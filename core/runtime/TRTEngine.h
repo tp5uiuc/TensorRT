@@ -21,22 +21,17 @@ namespace core {
 namespace runtime {
 
 #ifdef TRT_MAJOR_RTX
-using FlattenedState = std::tuple<
-    std::tuple<std::string, std::string>, // ABI_VERSION
-    std::tuple<std::string, std::string>, // name
-    std::tuple<std::string, std::string>, // device
-    std::tuple<std::string, std::string>, // engine
-    std::tuple<std::string, std::string>, // input binding names
-    std::tuple<std::string, std::string>, // output binding names
-    std::tuple<std::string, std::string>, // HW compatibility
-    std::tuple<std::string, std::string>, // requires_output_allocator
-    std::tuple<std::string, std::string>, // serialized metadata
-    std::tuple<std::string, std::string>, // Platform
-    std::tuple<std::string, std::string>, // Resource Allocation Strategy
-    std::tuple<std::string, std::string>, // Runtime Cache Path (TRT-RTX)
-    std::tuple<std::string, std::string>, // Dynamic Shapes Kernel Specialization Strategy (TRT-RTX)
-    std::tuple<std::string, std::string>>; // CUDA Graph Strategy (TRT-RTX)
+// Extra FlattenedState entries for TensorRT-RTX-only fields. Leading comma so this
+// macro can be dropped directly into the std::tuple parameter pack after the final
+// shared entry without duplicating the per-entry type in both branches.
+#define TRTRTX_FLATTENED_STATE_EXTRAS                                             \
+  , std::tuple<std::string, std::string> /* Runtime Cache Path */                 \
+      , std::tuple<std::string, std::string> /* Dynamic Shapes Kernel Strategy */ \
+      , std::tuple<std::string, std::string> /* CUDA Graph Strategy */
 #else
+#define TRTRTX_FLATTENED_STATE_EXTRAS
+#endif
+
 using FlattenedState = std::tuple<
     std::tuple<std::string, std::string>, // ABI_VERSION
     std::tuple<std::string, std::string>, // name
@@ -48,8 +43,8 @@ using FlattenedState = std::tuple<
     std::tuple<std::string, std::string>, // requires_output_allocator
     std::tuple<std::string, std::string>, // serialized metadata
     std::tuple<std::string, std::string>, // Platform
-    std::tuple<std::string, std::string>>; // Resource Allocation Strategy
-#endif
+    std::tuple<std::string, std::string> /* Resource Allocation Strategy */
+        TRTRTX_FLATTENED_STATE_EXTRAS>;
 
 struct TorchTRTRuntimeStates {
   // Indicates whether CUDAGraphs were enabled in the previous execute_engine
@@ -144,37 +139,33 @@ struct TRTEngine : torch::CustomClassHolder {
 
   ~TRTEngine();
   TRTEngine(
-      const std::string& serialized_engine,
+      std::string serialized_engine,
       const RTDevice& cuda_device,
       const std::vector<std::string>& in_binding_names,
       const std::vector<std::string>& out_binding_names,
       const Platform& target_platform = get_current_platform(),
       bool hardware_compatible = false,
       bool requires_output_allocator = false,
-      const std::string& serialized_metadata = "",
+      std::string serialized_metadata = "",
       const TRTEngine::ResourceAllocationStrategy resource_allocation_strategy =
           TRTEngine::ResourceAllocationStrategy::kStatic,
-      const std::string& runtime_cache_path = "",
-      int dynamic_shapes_kernel_strategy = 0,
-      int cuda_graph_strategy = 0);
+      TRTRuntimeConfig runtime_cfg = TRTRuntimeConfig{});
 
   TRTEngine(std::vector<std::string> serialized_info);
 
   TRTEngine(
-      const std::string& mod_name,
-      const std::string& serialized_engine,
+      std::string mod_name,
+      std::string serialized_engine,
       const RTDevice& cuda_device,
       const std::vector<std::string>& in_binding_names,
       const std::vector<std::string>& out_binding_names,
       const Platform& target_platform = get_current_platform(),
       bool hardware_compatible = false,
       bool requires_output_allocator = false,
-      const std::string& serialized_metadata = "",
+      std::string serialized_metadata = "",
       const TRTEngine::ResourceAllocationStrategy resource_allocation_strategy =
           TRTEngine::ResourceAllocationStrategy::kStatic,
-      const std::string& runtime_cache_path = "",
-      int dynamic_shapes_kernel_strategy = 0,
-      int cuda_graph_strategy = 0);
+      TRTRuntimeConfig runtime_cfg = TRTRuntimeConfig{});
 
   TRTEngine& operator=(const TRTEngine& other);
   std::string to_str() const;

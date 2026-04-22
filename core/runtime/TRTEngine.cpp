@@ -55,32 +55,28 @@ void DynamicOutputAllocator::notifyShape(char const* tensorName, nvinfer1::Dims 
 }
 
 TRTEngine::TRTEngine(
-    const std::string& serialized_engine,
+    std::string serialized_engine,
     const RTDevice& cuda_device,
     const std::vector<std::string>& _in_binding_names,
     const std::vector<std::string>& _out_binding_names,
     const Platform& target_platform,
     bool hardware_compatible,
     bool requires_output_allocator,
-    const std::string& serialized_metadata,
+    std::string serialized_metadata,
     const ResourceAllocationStrategy resource_allocation_strategy,
-    const std::string& runtime_cache_path,
-    int dynamic_shapes_kernel_strategy,
-    int cuda_graph_strategy)
+    TRTRuntimeConfig runtime_cfg)
     : TRTEngine(
           "deserialized_trt",
-          serialized_engine,
+          std::move(serialized_engine),
           cuda_device,
           _in_binding_names,
           _out_binding_names,
           target_platform,
           hardware_compatible,
           requires_output_allocator,
-          serialized_metadata,
+          std::move(serialized_metadata),
           resource_allocation_strategy,
-          runtime_cache_path,
-          dynamic_shapes_kernel_strategy,
-          cuda_graph_strategy) {}
+          std::move(runtime_cfg)) {}
 
 TRTEngine::TRTEngine(std::vector<std::string> serialized_info)
     : TRTEngine(
@@ -95,33 +91,22 @@ TRTEngine::TRTEngine(std::vector<std::string> serialized_info)
           serialized_info[SERIALIZED_METADATA_IDX],
           (static_cast<bool>(std::stoi(serialized_info[RESOURCE_ALLOCATION_STRATEGY_IDX]))
                ? ResourceAllocationStrategy::kDynamic
-               : ResourceAllocationStrategy::kStatic)
-#ifdef TRT_MAJOR_RTX
-              ,
-          serialized_info[RUNTIME_CACHE_PATH_IDX],
-          std::stoi(serialized_info[DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX]),
-          std::stoi(serialized_info[CUDA_GRAPH_STRATEGY_IDX])
-#endif
-      ) {
-}
+               : ResourceAllocationStrategy::kStatic),
+          make_runtime_config_from_serialized(serialized_info)) {}
 
 TRTEngine::TRTEngine(
-    const std::string& mod_name,
-    const std::string& serialized_engine,
+    std::string mod_name,
+    std::string serialized_engine,
     const RTDevice& cuda_device,
     const std::vector<std::string>& _in_binding_names,
     const std::vector<std::string>& _out_binding_names,
     const Platform& target_platform,
     bool hardware_compatible,
     bool requires_output_allocator,
-    const std::string& serialized_metadata,
+    std::string serialized_metadata,
     const ResourceAllocationStrategy resource_allocation_strategy,
-    const std::string& runtime_cache_path,
-    int dynamic_shapes_kernel_strategy,
-    int cuda_graph_strategy) {
-  runtime_cfg.runtime_cache_path = runtime_cache_path;
-  runtime_cfg.dynamic_shapes_kernel_strategy = to_dynamic_shapes_kernel_strategy(dynamic_shapes_kernel_strategy);
-  runtime_cfg.cuda_graph_strategy = to_cuda_graph_strategy_option(cuda_graph_strategy);
+    TRTRuntimeConfig runtime_cfg) {
+  this->runtime_cfg = std::move(runtime_cfg);
   TORCHTRT_CHECK(
       is_supported_on_current_platform(target_platform),
       "This engine was not built to run on this platform (built for: " << target_platform << ", current platform: "
@@ -132,7 +117,7 @@ TRTEngine::TRTEngine(
   auto most_compatible_device = get_most_compatible_device(cuda_device, RTDevice(), hardware_compatible);
   TORCHTRT_CHECK(most_compatible_device, "No compatible device was found for instantiating TensorRT engine");
 
-  this->serialized_metadata = serialized_metadata;
+  this->serialized_metadata = std::move(serialized_metadata);
   this->requires_output_allocator = requires_output_allocator;
   device_info = most_compatible_device.value();
   multi_gpu_device_check();
@@ -140,7 +125,7 @@ TRTEngine::TRTEngine(
 
   rt = make_trt(nvinfer1::createInferRuntime(util::logging::get_logger()));
 
-  name = slugify(mod_name);
+  name = slugify(std::move(mod_name));
 
   cuda_engine = make_trt(rt->deserializeCudaEngine(serialized_engine.c_str(), serialized_engine.size()));
   TORCHTRT_CHECK((cuda_engine.get() != nullptr), "Unable to deserialize the TensorRT engine");
@@ -279,13 +264,10 @@ TRTEngine::TRTEngine(
 }
 
 TRTEngine::~TRTEngine() {
-  // Destructors must not throw; `save_runtime_cache_nothrow` is itself no-throw but we
-  // wrap it defensively to keep stack unwinding safe in all circumstances.
-  try {
-    torch::cuda::synchronize(device_info.id);
-    runtime_cfg.save_runtime_cache_nothrow();
-  } catch (...) {
-  }
+  torch::cuda::synchronize(device_info.id);
+  // Marked noexcept by the type system, so safe to invoke from a destructor without
+  // explicit try/catch; any I/O error is logged internally.
+  runtime_cfg.save_runtime_cache();
   trt_engine_profiler.reset();
   exec_ctx.reset();
   cuda_engine.reset();
@@ -445,8 +427,8 @@ std::string TRTEngine::to_str() const {
   ss << "  Hardware Compatibility: " << (hardware_compatible ? "Enabled" : "Disabled") << std::endl;
   ss << "  Target Platform: " << target_platform << std::endl;
   ss << "  Resource Allocation Strategy: " << (resource_allocation_strategy == ResourceAllocationStrategy::kDynamic ? "Dynamic" : "Static") << std::endl;
+  ss << runtime_cfg;
   // clang-format on
-  runtime_cfg.write_to_str(ss);
   return ss.str();
 }
 
@@ -524,9 +506,10 @@ std::vector<std::string> TRTEngine::serialize() {
       this->resource_allocation_strategy == ResourceAllocationStrategy::kDynamic ? "1" : "0";
 #ifdef TRT_MAJOR_RTX
   serialized_info[RUNTIME_CACHE_PATH_IDX] = runtime_cfg.runtime_cache_path;
-  serialized_info[DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX] =
-      std::to_string(static_cast<int>(runtime_cfg.dynamic_shapes_kernel_strategy));
-  serialized_info[CUDA_GRAPH_STRATEGY_IDX] = std::to_string(static_cast<int>(runtime_cfg.cuda_graph_strategy));
+  serialized_info[DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX] = std::to_string(
+      static_cast<std::underlying_type_t<DynamicShapesKernelStrategy>>(runtime_cfg.dynamic_shapes_kernel_strategy));
+  serialized_info[CUDA_GRAPH_STRATEGY_IDX] =
+      std::to_string(static_cast<std::underlying_type_t<CudaGraphStrategyOption>>(runtime_cfg.cuda_graph_strategy));
 #endif
 
   return serialized_info;

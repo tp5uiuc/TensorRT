@@ -5,6 +5,8 @@
 #include <memory>
 #include <ostream>
 #include <string>
+#include <type_traits>
+#include <vector>
 
 #include "NvInfer.h"
 
@@ -25,10 +27,14 @@ enum class CudaGraphStrategyOption : int32_t {
   kWholeGraphCapture = 1,
 };
 
-std::string to_string(DynamicShapesKernelStrategy s);
-std::string to_string(CudaGraphStrategyOption s);
-DynamicShapesKernelStrategy to_dynamic_shapes_kernel_strategy(int v);
-CudaGraphStrategyOption to_cuda_graph_strategy_option(int v);
+// Conversion helpers. Signatures use the enum's underlying type (int32_t) rather than
+// raw `int` so call sites pass validated strategy codes directly without implicit
+// narrowing.
+[[nodiscard]] std::string to_string(DynamicShapesKernelStrategy s);
+[[nodiscard]] std::string to_string(CudaGraphStrategyOption s);
+[[nodiscard]] DynamicShapesKernelStrategy to_dynamic_shapes_kernel_strategy(
+    std::underlying_type_t<DynamicShapesKernelStrategy> v);
+[[nodiscard]] CudaGraphStrategyOption to_cuda_graph_strategy_option(std::underlying_type_t<CudaGraphStrategyOption> v);
 
 // Encapsulates the nvinfer1::IRuntimeConfig owned by a TRTEngine along with the
 // TensorRT-RTX-specific state (runtime cache, dynamic shapes kernel strategy, native
@@ -59,12 +65,12 @@ struct TRTRuntimeConfig {
 
   // Apply (or re-apply) the execution context allocation strategy on the IRuntimeConfig.
   // Available on both standard TensorRT and TensorRT-RTX via IRuntimeConfig.
-  void set_execution_context_allocation_strategy(nvinfer1::ExecutionContextAllocationStrategy strategy);
+  void set_execution_context_allocation_strategy(nvinfer1::ExecutionContextAllocationStrategy strategy) const;
 
   // Returns true if the TensorRT-RTX runtime owns capture/replay for this engine so the
   // caller should bypass its own at::cuda::CUDAGraph capture around enqueueV3. Always
   // false on non-RTX builds.
-  bool uses_internal_capture(bool cudagraphs_enabled) const;
+  [[nodiscard]] bool uses_internal_capture(bool cudagraphs_enabled) const;
 
   // One-shot: disable engine-internal CUDA graph capture. Invoked when an outer stream
   // capture is detected around execute_engine, so the outer capture can contain the
@@ -74,19 +80,33 @@ struct TRTRuntimeConfig {
 
   // Whether the execution context is safe to include in an outer monolithic capture.
   // Non-RTX builds always return true.
-  bool is_monolithic_capturable(nvinfer1::IExecutionContext* exec_ctx, cudaStream_t stream) const;
+  [[nodiscard]] bool is_monolithic_capturable(nvinfer1::IExecutionContext* exec_ctx, cudaStream_t stream) const;
 
-  // Load the runtime cache from disk using std::filesystem. No-throw: errors log and
-  // return. Invoked internally from `ensure_initialized` when a cache path is set.
-  void load_runtime_cache_nothrow() noexcept;
+  // Save the runtime cache to disk. Signature is `noexcept` so this is safe from a
+  // destructor. The underlying file I/O is performed by free functions declared below
+  // (non-noexcept, exception-leaky for easier testing); this member wraps them and
+  // swallows any exceptions.
+  void save_runtime_cache() noexcept;
 
-  // Save the runtime cache to disk using std::filesystem (tmp + rename). No-throw:
-  // errors log and return, so it is safe to call from a destructor.
-  void save_runtime_cache_nothrow() noexcept;
-
-  // Append a human-readable summary to a TRTEngine::to_str stream.
-  void write_to_str(std::ostream& os) const;
+  // Returns a human-readable summary of the runtime config.
+  [[nodiscard]] std::string to_str() const;
 };
+
+// Free-function I/O helpers. Declared outside TRTRuntimeConfig so they can be tested
+// independently of a live TRTEngine and without the noexcept suppression of the member
+// wrappers.
+//
+// These perform raw file I/O and may throw on failure; the member wrappers
+// (`save_runtime_cache`, `ensure_initialized`'s load step) catch and log instead.
+void load_runtime_cache(const std::string& path, nvinfer1::IRuntimeCache* cache);
+void save_runtime_cache(const std::string& path, nvinfer1::IRuntimeCache* cache);
+
+// Construct a TRTRuntimeConfig from a flattened serialization vector. Reads the
+// RTX-only indices only on RTX builds; standard TRT builds return a default-initialized
+// struct.
+[[nodiscard]] TRTRuntimeConfig make_runtime_config_from_serialized(const std::vector<std::string>& info);
+
+std::ostream& operator<<(std::ostream& os, const TRTRuntimeConfig& cfg);
 
 } // namespace runtime
 } // namespace core
