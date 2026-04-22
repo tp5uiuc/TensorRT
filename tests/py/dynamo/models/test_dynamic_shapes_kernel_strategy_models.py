@@ -129,5 +129,69 @@ class TestDynamicShapesKernelStrategyDynamic(TestCase):
         self._test_dynamic_batch_with_strategy("none")
 
 
+@unittest.skipIf(
+    not ENABLED_FEATURES.torch_tensorrt_runtime,
+    "C++ runtime is not available",
+)
+@unittest.skipIf(
+    not ENABLED_FEATURES.tensorrt_rtx,
+    "Dynamic shapes kernel specialization strategy requires TensorRT-RTX",
+)
+@unittest.skipIf(
+    not importlib.util.find_spec("torchvision"),
+    "torchvision is not installed",
+)
+class TestDynamicShapesKernelStrategyCppModels(TestCase):
+    """End-to-end model tests with each strategy exercised through the C++ runtime."""
+
+    def tearDown(self):
+        torch._dynamo.reset()
+
+    def _compile_and_verify_cpp(self, model, strategy):
+        input_tensor = torch.randn(4, 3, 224, 224).cuda()
+        compiled = torchtrt.compile(
+            model,
+            ir="dynamo",
+            inputs=[
+                torchtrt.Input(
+                    min_shape=(1, 3, 224, 224),
+                    opt_shape=(4, 3, 224, 224),
+                    max_shape=(8, 3, 224, 224),
+                    dtype=torch.float32,
+                )
+            ],
+            enabled_precisions={torch.float32},
+            use_python_runtime=False,
+            min_block_size=1,
+            dynamic_shapes_kernel_specialization_strategy=strategy,
+        )
+        ref_output = model(input_tensor)
+        trt_output = compiled(input_tensor)
+        cos_sim = cosine_similarity(ref_output, trt_output)
+        self.assertTrue(
+            cos_sim > COSINE_THRESHOLD,
+            f"C++ runtime cosine similarity {cos_sim} below threshold {COSINE_THRESHOLD} "
+            f"with strategy={strategy}",
+        )
+
+    def test_resnet18_lazy_strategy_cpp(self):
+        import torchvision.models as models
+
+        model = models.resnet18(pretrained=True).eval().cuda()
+        self._compile_and_verify_cpp(model, "lazy")
+
+    def test_resnet18_eager_strategy_cpp(self):
+        import torchvision.models as models
+
+        model = models.resnet18(pretrained=True).eval().cuda()
+        self._compile_and_verify_cpp(model, "eager")
+
+    def test_resnet18_none_strategy_cpp(self):
+        import torchvision.models as models
+
+        model = models.resnet18(pretrained=True).eval().cuda()
+        self._compile_and_verify_cpp(model, "none")
+
+
 if __name__ == "__main__":
     run_tests()

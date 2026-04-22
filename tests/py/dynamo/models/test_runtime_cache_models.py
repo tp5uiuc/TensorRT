@@ -325,5 +325,96 @@ class TestRuntimeCachePerformance(TestCase):
         self.assertTrue(True, "Timing test completed (informational)")
 
 
+@unittest.skipIf(
+    not ENABLED_FEATURES.torch_tensorrt_runtime,
+    "C++ runtime is not available",
+)
+@unittest.skipIf(
+    not ENABLED_FEATURES.tensorrt_rtx,
+    "Runtime cache is only available with TensorRT-RTX",
+)
+@unittest.skipIf(
+    not importlib.util.find_spec("torchvision"),
+    "torchvision is not installed",
+)
+class TestRuntimeCacheCppModels(TestCase):
+    """End-to-end model tests with runtime cache exercised through the C++ runtime."""
+
+    def setUp(self):
+        self.cache_dir = tempfile.mkdtemp()
+        self.cache_path = os.path.join(self.cache_dir, "runtime_cache.bin")
+
+    def tearDown(self):
+        shutil.rmtree(self.cache_dir, ignore_errors=True)
+        torch._dynamo.reset()
+
+    def test_resnet18_with_runtime_cache_cpp(self):
+        import torchvision.models as models
+
+        model = models.resnet18(pretrained=True).eval().cuda()
+        input_tensor = torch.randn(1, 3, 224, 224).cuda()
+
+        compiled = torchtrt.compile(
+            model,
+            ir="dynamo",
+            inputs=[torchtrt.Input(input_tensor.shape, dtype=torch.float32)],
+            enabled_precisions={torch.float32},
+            use_python_runtime=False,
+            min_block_size=1,
+            runtime_cache_path=self.cache_path,
+        )
+
+        ref_output = model(input_tensor)
+        trt_output = compiled(input_tensor)
+
+        cos_sim = cosine_similarity(ref_output, trt_output)
+        self.assertTrue(
+            cos_sim > COSINE_THRESHOLD,
+            f"ResNet18 C++ runtime cosine similarity {cos_sim} below threshold {COSINE_THRESHOLD}",
+        )
+
+        # Verify the runtime cache is persisted on engine destruction.
+        del compiled
+        gc.collect()
+        self.assertTrue(
+            os.path.isfile(self.cache_path),
+            "Runtime cache should be saved after ResNet18 C++-runtime inference",
+        )
+
+    def test_resnet18_cache_reuse_cpp(self):
+        """Warm-cache second compile should match eager output."""
+        import torchvision.models as models
+
+        model = models.resnet18(pretrained=True).eval().cuda()
+        input_tensor = torch.randn(1, 3, 224, 224).cuda()
+        ref_output = model(input_tensor)
+
+        compile_kwargs = {
+            "ir": "dynamo",
+            "inputs": [torchtrt.Input(input_tensor.shape, dtype=torch.float32)],
+            "enabled_precisions": {torch.float32},
+            "use_python_runtime": False,
+            "min_block_size": 1,
+            "runtime_cache_path": self.cache_path,
+        }
+
+        compiled1 = torchtrt.compile(model, **compile_kwargs)
+        out1 = compiled1(input_tensor)
+        self.assertTrue(
+            cosine_similarity(ref_output, out1) > COSINE_THRESHOLD,
+            "First ResNet18 C++-runtime output should match eager",
+        )
+        del compiled1
+        gc.collect()
+        self.assertTrue(os.path.isfile(self.cache_path))
+
+        compiled2 = torchtrt.compile(model, **compile_kwargs)
+        out2 = compiled2(input_tensor)
+        self.assertTrue(
+            cosine_similarity(ref_output, out2) > COSINE_THRESHOLD,
+            "Second ResNet18 C++-runtime output (warm cache) should match eager",
+        )
+
+
 if __name__ == "__main__":
     run_tests()
