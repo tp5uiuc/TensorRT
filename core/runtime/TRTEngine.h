@@ -20,18 +20,6 @@ namespace torch_tensorrt {
 namespace core {
 namespace runtime {
 
-#ifdef TRT_MAJOR_RTX
-// Extra FlattenedState entries for TensorRT-RTX-only fields. Leading comma so this
-// macro can be dropped directly into the std::tuple parameter pack after the final
-// shared entry without duplicating the per-entry type in both branches.
-#define TRTRTX_FLATTENED_STATE_EXTRAS                                             \
-  , std::tuple<std::string, std::string> /* Runtime Cache Path */                 \
-      , std::tuple<std::string, std::string> /* Dynamic Shapes Kernel Strategy */ \
-      , std::tuple<std::string, std::string> /* CUDA Graph Strategy */
-#else
-#define TRTRTX_FLATTENED_STATE_EXTRAS
-#endif
-
 using FlattenedState = std::tuple<
     std::tuple<std::string, std::string>, // ABI_VERSION
     std::tuple<std::string, std::string>, // name
@@ -43,8 +31,14 @@ using FlattenedState = std::tuple<
     std::tuple<std::string, std::string>, // requires_output_allocator
     std::tuple<std::string, std::string>, // serialized metadata
     std::tuple<std::string, std::string>, // Platform
-    std::tuple<std::string, std::string> /* Resource Allocation Strategy */
-        TRTRTX_FLATTENED_STATE_EXTRAS>;
+    std::tuple<std::string, std::string> // Resource Allocation Strategy
+#ifdef TRT_MAJOR_RTX
+    ,
+    std::tuple<std::string, std::string>, // Runtime Cache Path (TRT-RTX)
+    std::tuple<std::string, std::string>, // Dynamic Shapes Kernel Strategy (TRT-RTX)
+    std::tuple<std::string, std::string> // CUDA Graph Strategy (TRT-RTX)
+#endif
+    >;
 
 struct TorchTRTRuntimeStates {
   // Indicates whether CUDAGraphs were enabled in the previous execute_engine

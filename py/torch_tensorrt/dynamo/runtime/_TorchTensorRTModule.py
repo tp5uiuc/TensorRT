@@ -167,12 +167,14 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
         self.engine = None
         self.requires_output_allocator = requires_output_allocator
         self.dynamically_allocate_resources = settings.dynamically_allocate_resources
-        if ENABLED_FEATURES.tensorrt_rtx:
-            self.runtime_cache_path = settings.runtime_cache_path
-            self.dynamic_shapes_kernel_specialization_strategy = (
-                settings.dynamic_shapes_kernel_specialization_strategy
-            )
-            self.cuda_graph_strategy = settings.cuda_graph_strategy
+        # TensorRT-RTX-only runtime config mirror. The engine-info serialization slots
+        # only exist on RTX builds (see below), but we validate the strategy names on
+        # every build so typos are caught regardless of backend.
+        self.runtime_cache_path = settings.runtime_cache_path
+        self.dynamic_shapes_kernel_specialization_strategy = (
+            settings.dynamic_shapes_kernel_specialization_strategy
+        )
+        self.cuda_graph_strategy = settings.cuda_graph_strategy
         self.symbolic_shape_expressions = symbolic_shape_expressions
 
         if (
@@ -231,27 +233,32 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
         engine_info[RESOURCE_ALLOCATION_STRATEGY_IDX] = str(
             int(self.dynamically_allocate_resources)
         )
-        if ENABLED_FEATURES.tensorrt_rtx:
+        # Validate TensorRT-RTX strategy names on every build so typos are caught
+        # regardless of backend. The engine-info slots themselves only exist on RTX
+        # builds and are written below, but the validation is cheap and catches user
+        # errors early.
+        if ENABLED_FEATURES.tensorrt_rtx and self.runtime_cache_path is not None:
             engine_info[RUNTIME_CACHE_PATH_IDX] = self.runtime_cache_path or ""
-            if (
-                self.dynamic_shapes_kernel_specialization_strategy
-                not in _DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP
-            ):
-                raise ValueError(
-                    f"Invalid dynamic_shapes_kernel_specialization_strategy "
-                    f"{self.dynamic_shapes_kernel_specialization_strategy!r}; expected one of "
-                    f"{list(_DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP.keys())}"
-                )
+        if (
+            self.dynamic_shapes_kernel_specialization_strategy
+            not in _DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP
+        ):
+            raise ValueError(
+                f"Invalid dynamic_shapes_kernel_specialization_strategy "
+                f"{self.dynamic_shapes_kernel_specialization_strategy!r}; expected one of "
+                f"{list(_DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP.keys())}"
+            )
+        if self.cuda_graph_strategy not in _CUDA_GRAPH_STRATEGY_MAP:
+            raise ValueError(
+                f"Invalid cuda_graph_strategy {self.cuda_graph_strategy!r}; expected one of "
+                f"{list(_CUDA_GRAPH_STRATEGY_MAP.keys())}"
+            )
+        if ENABLED_FEATURES.tensorrt_rtx:
             engine_info[DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX] = str(
                 _DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP[
                     self.dynamic_shapes_kernel_specialization_strategy
                 ]
             )
-            if self.cuda_graph_strategy not in _CUDA_GRAPH_STRATEGY_MAP:
-                raise ValueError(
-                    f"Invalid cuda_graph_strategy {self.cuda_graph_strategy!r}; expected one of "
-                    f"{list(_CUDA_GRAPH_STRATEGY_MAP.keys())}"
-                )
             engine_info[CUDA_GRAPH_STRATEGY_IDX] = str(
                 _CUDA_GRAPH_STRATEGY_MAP[self.cuda_graph_strategy]
             )

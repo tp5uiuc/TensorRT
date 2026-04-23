@@ -27,15 +27,6 @@ enum class CudaGraphStrategyOption : int32_t {
   kWholeGraphCapture = 1,
 };
 
-// Conversion helpers. Signatures use the enum's underlying type (int32_t) rather than
-// raw `int` so call sites pass validated strategy codes directly without implicit
-// narrowing.
-[[nodiscard]] std::string to_string(DynamicShapesKernelStrategy s);
-[[nodiscard]] std::string to_string(CudaGraphStrategyOption s);
-[[nodiscard]] DynamicShapesKernelStrategy to_dynamic_shapes_kernel_strategy(
-    std::underlying_type_t<DynamicShapesKernelStrategy> v);
-[[nodiscard]] CudaGraphStrategyOption to_cuda_graph_strategy_option(std::underlying_type_t<CudaGraphStrategyOption> v);
-
 // Encapsulates the nvinfer1::IRuntimeConfig owned by a TRTEngine along with the
 // TensorRT-RTX-specific state (runtime cache, dynamic shapes kernel strategy, native
 // CUDA graph strategy). All `#ifdef TRT_MAJOR_RTX` guards live in this file and its
@@ -91,15 +82,6 @@ struct TRTRuntimeConfig {
   // Returns a human-readable summary of the runtime config.
   [[nodiscard]] std::string to_str() const;
 };
-
-// Free-function I/O helpers. Declared outside TRTRuntimeConfig so they can be tested
-// independently of a live TRTEngine and without the noexcept suppression of the member
-// wrappers.
-//
-// These perform raw file I/O and may throw on failure; the member wrappers
-// (`save_runtime_cache`, `ensure_initialized`'s load step) catch and log instead.
-void load_runtime_cache(const std::string& path, nvinfer1::IRuntimeCache* cache);
-void save_runtime_cache(const std::string& path, nvinfer1::IRuntimeCache* cache);
 
 // Construct a TRTRuntimeConfig from a flattened serialization vector. Reads the
 // RTX-only indices only on RTX builds; standard TRT builds return a default-initialized

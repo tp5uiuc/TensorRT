@@ -83,6 +83,13 @@ cc_library(
     linkopts = [
         "-lstdc++fs",
     ],
+    local_defines = select({
+        # TensorRT-RTX builds: opt into feature-gated APIs that the runtime layer
+        # depends on (e.g. IExecutionContext::isStreamCapturable).
+        ":rtx_win": ["ENABLE_FEATURE_DISABLE_RUNTIME_ALLOCATION"],
+        ":rtx_x86_64": ["ENABLE_FEATURE_DISABLE_RUNTIME_ALLOCATION"],
+        "//conditions:default": [],
+    }),
     deps = [
         "//core/plugins:torch_tensorrt_plugins",
         "//core/util:prelude",

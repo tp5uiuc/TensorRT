@@ -427,7 +427,7 @@ std::string TRTEngine::to_str() const {
   ss << "  Hardware Compatibility: " << (hardware_compatible ? "Enabled" : "Disabled") << std::endl;
   ss << "  Target Platform: " << target_platform << std::endl;
   ss << "  Resource Allocation Strategy: " << (resource_allocation_strategy == ResourceAllocationStrategy::kDynamic ? "Dynamic" : "Static") << std::endl;
-  ss << runtime_cfg;
+  ss << runtime_cfg.to_str();
   // clang-format on
   return ss.str();
 }
