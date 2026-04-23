@@ -192,7 +192,11 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
             else Platform.WIN_X86_64
         )
         self.profiling_enabled = False
+<<<<<<< HEAD
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+        self.target_device = self._resolve_target_device()
+>>>>>>> 867719852 (run all tests and fixed bugs)
 
         if (
             serialized_engine
@@ -201,6 +205,7 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
         ):
             self.setup_engine()
 
+<<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
     def __deepcopy__(self, memo: dict[int, Any]) -> "TorchTensorRTModule":
@@ -236,6 +241,14 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
 
 =======
 >>>>>>> 5b1bde79d (Merged two operator and fixed some comments)
+=======
+    def _resolve_target_device(self) -> torch.device:
+        """Resolve the engine's target CUDA device from compilation settings."""
+        if self.settings.device is not None:
+            return torch.device(f"cuda:{self.settings.device.gpu_id}")
+        return torch.device(f"cuda:{torch.cuda.current_device()}")
+
+>>>>>>> 867719852 (run all tests and fixed bugs)
     def _pack_engine_info(self) -> List[str | bytes]:
         target_device = (
             self.settings.device
@@ -410,7 +423,7 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
         elif self.serialized_engine:
             engine_info = self._pack_engine_info()
             assert isinstance(engine_info[ENGINE_IDX], bytes)
-            engine_info[ENGINE_IDX] = base64.b64encode(engine_info[ENGINE_IDX])  # type: ignore[arg-type]
+            engine_info[ENGINE_IDX] = base64.b64encode(engine_info[ENGINE_IDX])
             return (
                 self.name,
                 engine_info,
@@ -464,9 +477,17 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
 
         self.input_binding_names = state[2]
         self.output_binding_names = state[3]
+        self.target_device = self._resolve_target_device()
 
     def set_pre_allocated_outputs(self, enable: bool) -> None:
         self.engine.use_pre_allocated_outputs = enable
+
+    @property
+    def pre_allocated_outputs(self) -> Any:
+        """Pre-allocated output tensors currently held by the underlying engine."""
+        if self.engine is None:
+            return []
+        return getattr(self.engine, "pre_allocated_outputs", [])
 
     def set_use_output_allocator(self, enable: bool) -> None:
         self.engine.use_output_allocator_outputs = enable
@@ -476,10 +497,15 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
         if self.engine is None:
             raise RuntimeError("Engine has not been setup yet.")
 
-        assert len(inputs) == len(
-            self.input_binding_names
-        ), f"Wrong number of inputs, expected {len(self.input_binding_names)} got {len(inputs)}."
+        target = self.target_device
+        binding_names = self.input_binding_names
+        # len-check inlined (cheaper than keeping an f-string around the hot path)
+        if len(inputs) != len(binding_names):
+            raise AssertionError(
+                f"Wrong number of inputs, expected {len(binding_names)} got {len(inputs)}."
+            )
 
+<<<<<<< HEAD
 <<<<<<< HEAD
         # If the inputs are not Torch Tensors, which can occur in scenarios such as shape tensors
         # which are outputs of a preceding Torch subgraph (where the Dynamic input may be an integer)
@@ -515,6 +541,24 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
 =======
         outputs = list(torch.ops.tensorrt.execute_engine(input_tensors, self.engine))
 >>>>>>> 5b1bde79d (Merged two operator and fixed some comments)
+=======
+        input_tensors = list(inputs)
+        for i, value in enumerate(input_tensors):
+            if isinstance(value, torch.Tensor):
+                if value.device != target:
+                    logger.warning(
+                        "Input %s of engine %s is on %s, moving to %s.",
+                        binding_names[i],
+                        self.name,
+                        value.device,
+                        target,
+                    )
+                    input_tensors[i] = value.to(target)
+            else:
+                input_tensors[i] = torch.tensor(value, device=target)
+
+        outputs = torch.ops.tensorrt.execute_engine(input_tensors, self.engine)
+>>>>>>> 867719852 (run all tests and fixed bugs)
         if len(outputs) == 1:
             return outputs[0]
         return tuple(outputs)
