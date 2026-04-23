@@ -108,7 +108,7 @@ inference in ``distributed_context`` for safe NCCL lifecycle management:
         dynamic=True,
         options={
             "use_distributed_mode_trace": True,
-            "use_python_runtime": False,
+            "use_explicit_typing": True,  # enabled_precisions deprecated
             "min_block_size": 1,
         },
     )
@@ -626,15 +626,8 @@ Compilation Settings for Distributed Workloads
      - Description
    * - ``use_distributed_mode_trace``
      - ``False``
-     - Use ``aot_autograd`` for tracing instead of the default ``torch._dynamo`` path.
-       **Auto-enabled** for ``torch.compile`` when ``dist.is_initialized()`` and
-       ``world_size > 1`` — no explicit flag needed. Must be set manually when using
-       ``torch_tensorrt.dynamo.compile()`` directly (e.g. AOT export workflows).
-   * - ``use_python_runtime``
-     - ``None`` (auto)
-     - ``False`` (C++ runtime) is recommended for production. The C++ runtime handles
-       NCCL via TRT's native ``DistCollective`` layers. The Python runtime uses
-       Python-level NCCL wrappers.
+     - Use ``aot_autograd`` for tracing instead of the default path. Required when the
+       model contains DTensor or other distributed tensors.
    * - ``use_explicit_typing``
      - ``True``
      - Respect dtypes set in model/inputs (recommended). Use ``model.half()`` or
