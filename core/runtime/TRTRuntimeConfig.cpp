@@ -75,8 +75,7 @@ void load_runtime_cache(const std::string& path, nvinfer1::IRuntimeCache* cache)
   if (buf.empty()) {
     return;
   }
-  bool ok = cache->deserialize(buf.data(), buf.size());
-  TORCHTRT_CHECK(ok, "IRuntimeCache::deserialize returned false for " << path);
+  TORCHTRT_CHECK(cache->deserialize(buf.data(), buf.size()), "IRuntimeCache::deserialize returned false for " << path);
   LOG_INFO("Loaded runtime cache from " << path << " (" << buf.size() << " bytes)");
 }
 
@@ -123,12 +122,11 @@ void TRTRuntimeConfig::ensure_initialized(nvinfer1::ICudaEngine* cuda_engine) {
       } catch (const std::exception& e) {
         LOG_WARNING("Failed to load runtime cache from " << runtime_cache_path << ": " << e.what());
       }
-      bool ok = config->setRuntimeCache(*runtime_cache);
-      if (!ok) {
+      if (config->setRuntimeCache(*runtime_cache)) {
+        LOG_DEBUG("TensorRT-RTX runtime cache configured at " << runtime_cache_path);
+      } else {
         LOG_WARNING("Failed to attach runtime cache to IRuntimeConfig; cache will be unused.");
         runtime_cache.reset();
-      } else {
-        LOG_DEBUG("TensorRT-RTX runtime cache configured at " << runtime_cache_path);
       }
     }
   } else {
@@ -141,11 +139,10 @@ void TRTRuntimeConfig::ensure_initialized(nvinfer1::ICudaEngine* cuda_engine) {
   LOG_DEBUG("Dynamic shapes kernel specialization strategy set to " << to_string(dynamic_shapes_kernel_strategy));
 
   // CUDA graph strategy -- TRT-RTX only.
-  bool ok = config->setCudaGraphStrategy(
-      cuda_graph_strategy == CudaGraphStrategyOption::kWholeGraphCapture
-          ? nvinfer1::CudaGraphStrategy::kWHOLE_GRAPH_CAPTURE
-          : nvinfer1::CudaGraphStrategy::kDISABLED);
-  if (!ok) {
+  if (!config->setCudaGraphStrategy(
+          cuda_graph_strategy == CudaGraphStrategyOption::kWholeGraphCapture
+              ? nvinfer1::CudaGraphStrategy::kWHOLE_GRAPH_CAPTURE
+              : nvinfer1::CudaGraphStrategy::kDISABLED)) {
     LOG_WARNING("Failed to set CUDA graph strategy; continuing with default.");
   }
 #endif
@@ -181,11 +178,8 @@ void TRTRuntimeConfig::disable_rtx_native_cudagraphs(TORCHTRT_UNUSED const std::
   // capture will run without them otherwise, and we want future reloads to reuse them.
   save_runtime_cache();
   cuda_graph_strategy = CudaGraphStrategyOption::kDisabled;
-  if (config) {
-    bool ok = config->setCudaGraphStrategy(nvinfer1::CudaGraphStrategy::kDISABLED);
-    if (!ok) {
-      LOG_WARNING("Failed to update CUDA graph strategy on IRuntimeConfig after disable.");
-    }
+  if (config && !config->setCudaGraphStrategy(nvinfer1::CudaGraphStrategy::kDISABLED)) {
+    LOG_WARNING("Failed to update CUDA graph strategy on IRuntimeConfig after disable.");
   }
   rtx_native_cudagraphs_disabled = true;
 #endif

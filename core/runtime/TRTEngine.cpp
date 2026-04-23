@@ -545,6 +545,12 @@ void TRTEngine::disable_rtx_native_cudagraphs() {
 }
 
 void TRTEngine::recreate_execution_context() {
+  // Flush any kernels the previous execution context may have compiled into the
+  // runtime cache before creating the replacement. The destructor also saves, but
+  // doing it here guards against losing compiled kernels across profiling toggles,
+  // allocator changes, or process kills that happen between allocator changes and
+  // teardown. No-op on standard TensorRT or when no cache path is configured.
+  runtime_cfg.save_runtime_cache();
   runtime_cfg.ensure_initialized(cuda_engine.get());
   runtime_cfg.set_execution_context_allocation_strategy(
       resource_allocation_strategy == ResourceAllocationStrategy::kDynamic
