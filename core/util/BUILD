@@ -153,11 +153,27 @@ cc_library(
     alwayslink = True,
 )
 
+cc_library(
+    name = "file_lock",
+    srcs = [
+        "file_lock.cpp",
+    ],
+    hdrs = [
+        "file_lock.h",
+    ],
+    linkopts = select({
+        ":windows": [],
+        "//conditions:default": ["-lstdc++fs"],
+    }),
+    alwayslink = True,
+)
+
 filegroup(
     name = "include_files",
     srcs = [
         "Exception.h",
         "build_info.h",
+        "file_lock.h",
         "jit_util.h",
         "macros.h",
         "prelude.h",

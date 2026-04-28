@@ -36,6 +36,7 @@ test_suite(
         ":test_dynamic_fallback",
         ":test_dynamic_size",
         ":test_example_tensors",
+        ":test_file_lock",
         ":test_module_fallback",
         ":test_modules_as_engines",
         ":test_multiple_registered_engines",
@@ -53,6 +54,7 @@ test_suite(
         ":test_dynamic_fallback",
         ":test_dynamic_size",
         ":test_example_tensors",
+        ":test_file_lock",
         ":test_module_fallback",
         ":test_modules_as_engines",
         ":test_multiple_registered_engines",
@@ -234,4 +236,13 @@ cc_library(
         ":jetpack": ["@torch_l4t//:libtorch"],
         "//conditions:default": ["@libtorch"],
     }),
+)
+
+cc_test(
+    name = "test_file_lock",
+    srcs = ["test_file_lock.cpp"],
+    deps = [
+        "//core/util:file_lock",
+        "@googletest//:gtest_main",
+    ],
 )

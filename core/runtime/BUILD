@@ -92,6 +92,7 @@ cc_library(
     }),
     deps = [
         "//core/plugins:torch_tensorrt_plugins",
+        "//core/util:file_lock",
         "//core/util:prelude",
     ] + select({
         ":jetpack": ["@tensorrt_l4t//:nvinfer"],
