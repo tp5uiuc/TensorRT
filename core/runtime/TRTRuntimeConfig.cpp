@@ -92,7 +92,7 @@ void load_runtime_cache(const std::string& path, nvinfer1::IRuntimeCache* cache)
         lock.try_lock_for(FileLock::Mode::Shared, kRuntimeCacheLockTimeout),
         "Timed out acquiring shared lock for runtime cache " << path);
     std::ifstream f(path, std::ios::binary);
-    buf.assign((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    buf.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
   }
   // Lock released; deserialize can be slow and does not need to hold readers off.
   if (buf.empty()) {

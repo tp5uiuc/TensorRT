@@ -36,10 +36,6 @@ class FileLock {
  public:
   enum class Mode { Shared, Exclusive };
 
-  // Empty lock (no underlying file). Used as the move-from target so move ops can
-  // delegate to default-construct + swap.
-  FileLock() noexcept = default;
-
   // Opens (creates if needed) the lock file. Throws std::system_error on open failure.
   explicit FileLock(std::filesystem::path lock_path);
   ~FileLock() noexcept;
@@ -65,6 +61,10 @@ class FileLock {
   [[nodiscard]] bool owns_lock() const noexcept;
 
  private:
+  // Empty lock (no underlying file). Private because its only purpose is to serve as
+  // the delegation target for the move ctor (which then swaps in the source's state).
+  FileLock() noexcept = default;
+
   detail::LockHandle handle_;
   bool owned_ = false;
   std::filesystem::path path_;
