@@ -7,6 +7,21 @@ namespace torch_tensorrt {
 namespace core {
 namespace util {
 
+namespace detail {
+
+// Platform-specific handle for the underlying lock file. The platform #ifdef is confined
+// to this struct definition; all operations on it (defined in file_lock.cpp) take a
+// LockHandle& and keep the platform branch internal.
+struct LockHandle {
+#ifdef _WIN32
+  void* native = nullptr; // HANDLE; void* keeps <windows.h> out of this header.
+#else
+  int native = -1;
+#endif
+};
+
+} // namespace detail
+
 // Cross-platform RAII file lock matching filelock's lock-file convention so the C++ and
 // Python torch-TRT runtimes can safely share a runtime cache path.
 //
@@ -17,12 +32,13 @@ namespace util {
 // Usage rule: each thread / call site must construct its own FileLock. flock locks live
 // per open file description, so two threads sharing one FileLock instance share one OFD
 // and would not actually serialize against each other.
-//
-// NFS caveat: flock(2) is unreliable on older NFS kernels. filelock has the same
-// limitation; this is not a torch-TRT-specific regression.
 class FileLock {
  public:
   enum class Mode { Shared, Exclusive };
+
+  // Empty lock (no underlying file). Used as the move-from target so move ops can
+  // delegate to default-construct + swap.
+  FileLock() noexcept = default;
 
   // Opens (creates if needed) the lock file. Throws std::system_error on open failure.
   explicit FileLock(std::filesystem::path lock_path);
@@ -32,6 +48,8 @@ class FileLock {
   FileLock& operator=(const FileLock&) = delete;
   FileLock(FileLock&&) noexcept;
   FileLock& operator=(FileLock&&) noexcept;
+
+  friend void swap(FileLock& a, FileLock& b) noexcept;
 
   // Blocks until acquired. Throws std::system_error on hard error.
   void lock(Mode mode);
@@ -47,11 +65,7 @@ class FileLock {
   [[nodiscard]] bool owns_lock() const noexcept;
 
  private:
-#ifdef _WIN32
-  void* handle_ = nullptr; // HANDLE; void* keeps <windows.h> out of this header.
-#else
-  int fd_ = -1;
-#endif
+  detail::LockHandle handle_;
   bool owned_ = false;
   std::filesystem::path path_;
 };

@@ -23,10 +23,12 @@ namespace {
 
 constexpr std::chrono::milliseconds kPollInterval{50};
 
-#ifdef _WIN32
+// Platform-isolated operations on detail::LockHandle. The #ifdefs live exclusively
+// inside these helpers so call sites in the FileLock class stay platform-independent.
 
-void* open_handle(const std::filesystem::path& path) {
-  HANDLE h = ::CreateFileW(
+void open_handle(detail::LockHandle& h, const std::filesystem::path& path) {
+#ifdef _WIN32
+  HANDLE w = ::CreateFileW(
       path.wstring().c_str(),
       GENERIC_READ | GENERIC_WRITE,
       FILE_SHARE_READ | FILE_SHARE_WRITE,
@@ -34,22 +36,44 @@ void* open_handle(const std::filesystem::path& path) {
       OPEN_ALWAYS,
       FILE_ATTRIBUTE_NORMAL,
       nullptr);
-  if (h == INVALID_HANDLE_VALUE) {
+  if (w == INVALID_HANDLE_VALUE) {
     throw std::system_error(
         static_cast<int>(::GetLastError()),
         std::system_category(),
         "FileLock: CreateFileW failed for " + path.string());
   }
-  return h;
+  h.native = w;
+#else
+  int fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+  if (fd < 0) {
+    throw std::system_error(errno, std::generic_category(), "FileLock: open failed for " + path.string());
+  }
+  h.native = fd;
+#endif
 }
 
-bool windows_lock(void* handle, FileLock::Mode mode, bool blocking) {
+void close_handle(detail::LockHandle& h) noexcept {
+#ifdef _WIN32
+  if (h.native != nullptr) {
+    ::CloseHandle(h.native);
+    h.native = nullptr;
+  }
+#else
+  if (h.native >= 0) {
+    ::close(h.native);
+    h.native = -1;
+  }
+#endif
+}
+
+bool try_acquire(detail::LockHandle& h, FileLock::Mode mode, bool blocking) {
+#ifdef _WIN32
   DWORD flags = (mode == FileLock::Mode::Exclusive) ? LOCKFILE_EXCLUSIVE_LOCK : 0;
   if (!blocking) {
     flags |= LOCKFILE_FAIL_IMMEDIATELY;
   }
   OVERLAPPED ovl{};
-  if (::LockFileEx(handle, flags, 0, 1, 0, &ovl)) {
+  if (::LockFileEx(h.native, flags, 0, 1, 0, &ovl)) {
     return true;
   }
   DWORD err = ::GetLastError();
@@ -57,30 +81,13 @@ bool windows_lock(void* handle, FileLock::Mode mode, bool blocking) {
     return false;
   }
   throw std::system_error(static_cast<int>(err), std::system_category(), "FileLock: LockFileEx failed");
-}
-
-void windows_unlock(void* handle) noexcept {
-  OVERLAPPED ovl{};
-  ::UnlockFileEx(handle, 0, 1, 0, &ovl);
-}
-
 #else
-
-int open_fd(const std::filesystem::path& path) {
-  int fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
-  if (fd < 0) {
-    throw std::system_error(errno, std::generic_category(), "FileLock: open failed for " + path.string());
-  }
-  return fd;
-}
-
-bool unix_lock(int fd, FileLock::Mode mode, bool blocking) {
   int operation = (mode == FileLock::Mode::Exclusive) ? LOCK_EX : LOCK_SH;
   if (!blocking) {
     operation |= LOCK_NB;
   }
   while (true) {
-    if (::flock(fd, operation) == 0) {
+    if (::flock(h.native, operation) == 0) {
       return true;
     }
     int err = errno;
@@ -92,98 +99,60 @@ bool unix_lock(int fd, FileLock::Mode mode, bool blocking) {
     }
     throw std::system_error(err, std::generic_category(), "FileLock: flock failed");
   }
-}
-
-void unix_unlock(int fd) noexcept {
-  while (::flock(fd, LOCK_UN) == -1 && errno == EINTR) {
-  }
-}
-
 #endif
+}
+
+void release_handle(detail::LockHandle& h) noexcept {
+#ifdef _WIN32
+  OVERLAPPED ovl{};
+  ::UnlockFileEx(h.native, 0, 1, 0, &ovl);
+#else
+  while (::flock(h.native, LOCK_UN) == -1 && errno == EINTR) {
+  }
+#endif
+}
 
 } // namespace
 
 FileLock::FileLock(std::filesystem::path lock_path) : path_(std::move(lock_path)) {
-#ifdef _WIN32
-  handle_ = open_handle(path_);
-#else
-  fd_ = open_fd(path_);
-#endif
+  open_handle(handle_, path_);
 }
 
 FileLock::~FileLock() noexcept {
   if (owned_) {
-    unlock();
+    release_handle(handle_);
   }
-#ifdef _WIN32
-  if (handle_ != nullptr) {
-    ::CloseHandle(handle_);
-    handle_ = nullptr;
-  }
-#else
-  if (fd_ >= 0) {
-    ::close(fd_);
-    fd_ = -1;
-  }
-#endif
+  close_handle(handle_);
 }
 
-FileLock::FileLock(FileLock&& other) noexcept : owned_(other.owned_), path_(std::move(other.path_)) {
-#ifdef _WIN32
-  handle_ = other.handle_;
-  other.handle_ = nullptr;
-#else
-  fd_ = other.fd_;
-  other.fd_ = -1;
-#endif
-  other.owned_ = false;
+FileLock::FileLock(FileLock&& other) noexcept : FileLock() {
+  swap(*this, other);
 }
 
 FileLock& FileLock::operator=(FileLock&& other) noexcept {
-  if (this == &other) {
-    return *this;
-  }
-  if (owned_) {
-    unlock();
-  }
-#ifdef _WIN32
-  if (handle_ != nullptr) {
-    ::CloseHandle(handle_);
-  }
-  handle_ = other.handle_;
-  other.handle_ = nullptr;
-#else
-  if (fd_ >= 0) {
-    ::close(fd_);
-  }
-  fd_ = other.fd_;
-  other.fd_ = -1;
-#endif
-  owned_ = other.owned_;
-  other.owned_ = false;
-  path_ = std::move(other.path_);
+  FileLock tmp(std::move(other));
+  swap(*this, tmp);
   return *this;
 }
 
+void swap(FileLock& a, FileLock& b) noexcept {
+  using std::swap;
+  swap(a.handle_, b.handle_);
+  swap(a.owned_, b.owned_);
+  swap(a.path_, b.path_);
+}
+
 void FileLock::lock(Mode mode) {
-#ifdef _WIN32
-  windows_lock(handle_, mode, /*blocking=*/true);
-#else
-  unix_lock(fd_, mode, /*blocking=*/true);
-#endif
+  try_acquire(handle_, mode, /*blocking=*/true);
   owned_ = true;
 }
 
 bool FileLock::try_lock(Mode mode) {
-#ifdef _WIN32
-  bool acquired = windows_lock(handle_, mode, /*blocking=*/false);
-#else
-  bool acquired = unix_lock(fd_, mode, /*blocking=*/false);
-#endif
-  if (acquired) {
+  if (try_acquire(handle_, mode, /*blocking=*/false)) {
     owned_ = true;
+    return true;
   }
-  return acquired;
+  return false;
 }
 
 bool FileLock::try_lock_for(Mode mode, std::chrono::milliseconds timeout) {
@@ -203,11 +172,7 @@ void FileLock::unlock() noexcept {
   if (!owned_) {
     return;
   }
-#ifdef _WIN32
-  windows_unlock(handle_);
-#else
-  unix_unlock(fd_);
-#endif
+  release_handle(handle_);
   owned_ = false;
 }
 
