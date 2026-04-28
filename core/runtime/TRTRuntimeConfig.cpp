@@ -85,12 +85,16 @@ void load_runtime_cache(const std::string& path, nvinfer1::IRuntimeCache* cache)
     LOG_DEBUG("No existing runtime cache at " << path);
     return;
   }
-  FileLock lock(lock_path_for(path));
-  TORCHTRT_CHECK(
-      lock.try_lock_for(FileLock::Mode::Shared, kRuntimeCacheLockTimeout),
-      "Timed out acquiring shared lock for runtime cache " << path);
-  std::ifstream f(path, std::ios::binary);
-  std::vector<char> buf((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+  std::vector<char> buf;
+  {
+    FileLock lock(lock_path_for(path));
+    TORCHTRT_CHECK(
+        lock.try_lock_for(FileLock::Mode::Shared, kRuntimeCacheLockTimeout),
+        "Timed out acquiring shared lock for runtime cache " << path);
+    std::ifstream f(path, std::ios::binary);
+    buf.assign((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+  }
+  // Lock released; deserialize can be slow and does not need to hold readers off.
   if (buf.empty()) {
     return;
   }
@@ -108,17 +112,17 @@ void save_runtime_cache_impl(const std::string& path, nvinfer1::IRuntimeCache* c
   if (fs_path.has_parent_path()) {
     std::filesystem::create_directories(fs_path.parent_path());
   }
-  FileLock lock(lock_path_for(path));
-  TORCHTRT_CHECK(
-      lock.try_lock_for(FileLock::Mode::Exclusive, kRuntimeCacheLockTimeout),
-      "Timed out acquiring exclusive lock for runtime cache " << path);
-  std::filesystem::path tmp_path = fs_path;
-  tmp_path += ".tmp";
+  // Exclusive lock keeps concurrent readers off while we overwrite the file in place,
+  // so the tmp + rename dance is unnecessary here. The ofstream goes out of scope (and
+  // flushes) before the lock is released.
   {
-    std::ofstream out(tmp_path, std::ios::binary);
+    FileLock lock(lock_path_for(path));
+    TORCHTRT_CHECK(
+        lock.try_lock_for(FileLock::Mode::Exclusive, kRuntimeCacheLockTimeout),
+        "Timed out acquiring exclusive lock for runtime cache " << path);
+    std::ofstream out(fs_path, std::ios::binary);
     out.write(reinterpret_cast<const char*>(host_mem->data()), host_mem->size());
   }
-  std::filesystem::rename(tmp_path, fs_path);
   LOG_INFO("Saved runtime cache to " << path << " (" << host_mem->size() << " bytes)");
 }
 #endif // TRT_MAJOR_RTX
