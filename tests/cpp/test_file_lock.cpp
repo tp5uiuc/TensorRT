@@ -165,7 +165,7 @@ TEST(FileLock, OpenFailureThrows) {
 TEST(FileLock, InteropFlockNamespaceMatch) {
   // Take an exclusive flock on the file directly with a separately-opened fd, then
   // assert FileLock::try_lock(Exclusive) sees the contention. Proves we are in the same
-  // BSD-flock namespace py-filelock uses (and not the independent fcntl namespace).
+  // BSD-flock namespace filelock uses (and not the independent fcntl namespace).
   LockPath p("interop_flock");
   // Touch the file so flock has something to open (FileLock would create it via O_CREAT,
   // but the raw flock here uses O_RDWR only -- create explicitly).

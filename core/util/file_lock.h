@@ -7,18 +7,18 @@ namespace torch_tensorrt {
 namespace core {
 namespace util {
 
-// Cross-platform RAII file lock matching py-filelock's wire protocol so the C++ and
+// Cross-platform RAII file lock matching filelock's lock-file convention so the C++ and
 // Python torch-TRT runtimes can safely share a runtime cache path.
 //
 // Backend: Unix uses BSD flock(2); Windows uses LockFileEx on byte (0,1). The byte range
-// and primitive are deliberately matched to py-filelock so a Python FileLock and a C++
+// and primitive are deliberately matched to filelock so a Python FileLock and a C++
 // FileLock on the same .lock file conflict correctly across the runtime boundary.
 //
 // Usage rule: each thread / call site must construct its own FileLock. flock locks live
 // per open file description, so two threads sharing one FileLock instance share one OFD
 // and would not actually serialize against each other.
 //
-// NFS caveat: flock(2) is unreliable on older NFS kernels. py-filelock has the same
+// NFS caveat: flock(2) is unreliable on older NFS kernels. filelock has the same
 // limitation; this is not a torch-TRT-specific regression.
 class FileLock {
  public:

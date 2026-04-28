@@ -258,7 +258,7 @@ class TestRuntimeCacheConcurrency(TestCase):
 
     @parameterized.expand(_RUNTIMES)
     def test_filelock_works(self, _name, use_python_runtime):
-        """An external py-filelock acquire on <cache>.lock must succeed after save."""
+        """An external filelock acquire on <cache>.lock must succeed after save."""
         self._skip_if_cpp_unavailable(use_python_runtime)
         model, inputs = _fresh_conv_model_and_inputs()
         compiled = _compile(
@@ -394,7 +394,7 @@ class TestRuntimeCacheConcurrency(TestCase):
         self.assertGreater(os.path.getsize(self.cache_path), 0)
 
     def test_python_lock_blocks_cpp_save(self):
-        """An externally-held py-filelock on <cache>.lock must cause the C++ runtime
+        """An externally-held filelock on <cache>.lock must cause the C++ runtime
         save to time out silently (save_runtime_cache is noexcept). The cache file must
         not be modified while the external lock is held."""
         if not ENABLED_FEATURES.torch_tensorrt_runtime:
@@ -418,7 +418,7 @@ class TestRuntimeCacheConcurrency(TestCase):
         initial_size = os.path.getsize(self.cache_path)
 
         # Hold the Python lock across the C++ runtime's dispose-time save.
-        # The C++ save uses a 10s timeout matching py-filelock's default; it should
+        # The C++ save uses a 10s timeout matching filelock's default; it should
         # time out silently while we hold the lock.
         external = PyFileLock(self.cache_path + ".lock")
         with external.acquire(timeout=5):

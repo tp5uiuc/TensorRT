@@ -68,7 +68,7 @@ namespace {
 // itself TensorRT-RTX-only and tests reach this path through the member wrappers.
 //
 // Concurrent access is serialized with a FileLock on <cache_path>.lock matching
-// py-filelock's wire protocol so a Python and C++ runtime sharing one cache path do not
+// filelock's lock-file convention so a Python and C++ runtime sharing one cache path do not
 // race the rename. Load takes a shared lock (multiple readers allowed); save takes an
 // exclusive lock.
 using torch_tensorrt::core::util::FileLock;
