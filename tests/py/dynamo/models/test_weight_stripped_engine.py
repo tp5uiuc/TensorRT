@@ -35,10 +35,14 @@ class TestWeightStrippedEngine(TestCase):
 
         settings = {
 <<<<<<< HEAD
+<<<<<<< HEAD
             "use_python_runtime": False,
 =======
             "enabled_precisions": {torch.float},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+            "use_python_runtime": False,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
             "min_block_size": 1,
             "immutable_weights": False,
             "strip_engine_weights": False,
@@ -88,10 +92,14 @@ class TestWeightStrippedEngine(TestCase):
 
         settings = {
 <<<<<<< HEAD
+<<<<<<< HEAD
             "use_python_runtime": False,
 =======
             "enabled_precisions": {torch.float},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+            "use_python_runtime": False,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
             "min_block_size": 1,
             "immutable_weights": False,
             "strip_engine_weights": True,
@@ -178,10 +186,14 @@ class TestWeightStrippedEngine(TestCase):
             exp_program,
             tuple(inputs),
 <<<<<<< HEAD
+<<<<<<< HEAD
             use_python_runtime=True,
 =======
             enabled_precisions={torch.float},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+            use_python_runtime=True,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
             min_block_size=1,
             immutable_weights=False,
             strip_engine_weights=True,
@@ -206,10 +218,14 @@ class TestWeightStrippedEngine(TestCase):
             backend="tensorrt",
             options={
 <<<<<<< HEAD
+<<<<<<< HEAD
                 "use_python_runtime": False,
 =======
                 "enabled_precisions": {torch.float},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+                "use_python_runtime": False,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                 "min_block_size": 1,
                 "immutable_weights": False,
                 "cache_built_engines": False,
@@ -256,10 +272,14 @@ class TestWeightStrippedEngine(TestCase):
             exp_program,
             tuple(example_inputs),
 <<<<<<< HEAD
+<<<<<<< HEAD
             use_python_runtime=True,
 =======
             enabled_precisions={torch.float},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+            use_python_runtime=True,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
             min_block_size=1,
             immutable_weights=False,
             strip_engine_weights=False,
@@ -337,10 +357,14 @@ class TestWeightStrippedEngine(TestCase):
                 exp_program,
                 tuple(inputs),
 <<<<<<< HEAD
+<<<<<<< HEAD
                 use_python_runtime=True,
 =======
                 enabled_precisions={torch.float},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+                use_python_runtime=True,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                 min_block_size=1,
                 immutable_weights=False,
                 cache_built_engines=cache_built_engines,
@@ -424,10 +448,14 @@ class TestWeightStrippedEngine(TestCase):
                 backend="tensorrt",
                 options={
 <<<<<<< HEAD
+<<<<<<< HEAD
                     "use_python_runtime": False,
 =======
                     "enabled_precisions": {torch.float},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+                    "use_python_runtime": False,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                     "min_block_size": 1,
                     "immutable_weights": False,
                     "cache_built_engines": cache_built_engines,
@@ -504,10 +532,14 @@ class TestWeightStrippedEngine(TestCase):
                 backend="tensorrt",
                 options={
 <<<<<<< HEAD
+<<<<<<< HEAD
                     "use_python_runtime": True,
 =======
                     "enabled_precisions": {torch.float},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+                    "use_python_runtime": True,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                     "min_block_size": 1,
                     "immutable_weights": False,
                     "cache_built_engines": True,
@@ -549,6 +581,7 @@ class TestWeightStrippedEngine(TestCase):
             inputs=tuple(inputs),
             min_block_size=1,
             immutable_weights=False,
+            use_python_runtime=True,
             strip_engine_weights=True,
             refit_identical_engine_weights=False,
         )
@@ -584,9 +617,15 @@ class TestWeightStrippedEngine(TestCase):
         pyt_results = pyt_model(*inputs)
 
         for i in range(2):
+            if i == 0:
+                use_python_runtime = True
+            else:
+                use_python_runtime = False
+
             trt_gm = torch_trt.dynamo.compile(
                 exp_program,
                 tuple(inputs),
+                use_python_runtime=use_python_runtime,
                 min_block_size=1,
                 immutable_weights=False,
                 strip_engine_weights=True,
@@ -601,7 +640,7 @@ class TestWeightStrippedEngine(TestCase):
             cos_sim = cosine_similarity(pyt_results, refitted_output)
             assertions.assertTrue(
                 cos_sim > COSINE_THRESHOLD,
-                msg=f"iteration {i}: TorchTensorRTModule outputs don't match with the original model. Cosine sim score: {cos_sim} Threshold: {COSINE_THRESHOLD}",
+                msg=f"{'PythonTorchTensorRTModule' if use_python_runtime else 'TorchTensorRTModule'} outputs don't match with the original model. Cosine sim score: {cos_sim} Threshold: {COSINE_THRESHOLD}",
             )
 
     @unittest.skip("Waiting for implementation")
@@ -626,10 +665,14 @@ class TestWeightStrippedEngine(TestCase):
             exp_program,
             tuple(example_inputs),
 <<<<<<< HEAD
+<<<<<<< HEAD
             use_python_runtime=True,
 =======
             enabled_precisions={torch.float},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+            use_python_runtime=True,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
             min_block_size=1,
             immutable_weights=False,
             strip_engine_weights=True,
@@ -682,10 +725,14 @@ class TestWeightStrippedEngine(TestCase):
             exp_program,
             inputs,
 <<<<<<< HEAD
+<<<<<<< HEAD
             use_python_runtime=True,
 =======
             enabled_precisions={torch.float},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+            use_python_runtime=True,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
             min_block_size=1,
             immutable_weights=False,
             cache_built_engines=False,
@@ -726,10 +773,14 @@ class TestWeightStrippedEngine(TestCase):
             backend="tensorrt",
             options={
 <<<<<<< HEAD
+<<<<<<< HEAD
                 "use_python_runtime": False,
 =======
                 "enabled_precisions": {torch.float},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+                "use_python_runtime": False,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                 "min_block_size": 1,
                 "immutable_weights": False,
                 "cache_built_engines": False,

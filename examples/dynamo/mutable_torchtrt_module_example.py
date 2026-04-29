@@ -33,10 +33,14 @@ inputs = [torch.rand((1, 3, 224, 224)).to("cuda")]
 # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 settings = {
 <<<<<<< HEAD
+<<<<<<< HEAD
     "use_python_runtime": False,
 =======
     "enabled_precisions": {torch.float32},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+    "use_python_runtime": False,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
     "immutable_weights": False,
 }
 
@@ -70,7 +74,7 @@ print("Refit successfully!")
 # Saving Mutable Torch TensorRT Module
 # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-# Saving requires a C++-runtime compiled graph (see MutableTorchTensorRTModule.save).
+# Currently, saving is only enabled when "use_python_runtime" = False in settings
 torch_trt.MutableTorchTensorRTModule.save(mutable_module, "mutable_module.pkl")
 reload = torch_trt.MutableTorchTensorRTModule.load("mutable_module.pkl")
 
@@ -82,10 +86,14 @@ reload = torch_trt.MutableTorchTensorRTModule.load("mutable_module.pkl")
 with torch.no_grad():
     settings = {
 <<<<<<< HEAD
+<<<<<<< HEAD
         "use_python_runtime": True,
 =======
         "enabled_precisions": {torch.float16},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+        "use_python_runtime": True,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
         "immutable_weights": False,
     }
 
@@ -223,8 +231,12 @@ model = torch_trt.MutableTorchTensorRTModule(
 =======
 model = torch_trt.MutableTorchTensorRTModule(
     model,
+<<<<<<< HEAD
     enabled_precisions={torch.float},
 >>>>>>> 231434eae (Changed tests and docs)
+=======
+    use_python_runtime=True,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
     min_block_size=1,
     immutable_weights=False,
     cache_built_engines=True,

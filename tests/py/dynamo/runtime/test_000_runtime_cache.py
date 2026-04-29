@@ -34,6 +34,10 @@ def _compile_simple(runtime_cache_path=None):
     kwargs = {
         "ir": "dynamo",
         "inputs": inputs,
+<<<<<<< HEAD
+=======
+        "enabled_precisions": {torch.float32},
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
         "use_python_runtime": True,
         "min_block_size": 1,
     }
@@ -45,6 +49,7 @@ def _compile_simple(runtime_cache_path=None):
 
 
 def _find_python_trt_module(compiled):
+<<<<<<< HEAD
     """Walk the compiled graph module to find PythonTorchTensorRTModule instances."""
     from torch_tensorrt.dynamo.runtime._PythonTorchTensorRTModule import (
         PythonTorchTensorRTModule,
@@ -52,6 +57,13 @@ def _find_python_trt_module(compiled):
 
     for name, mod in compiled.named_modules():
         if isinstance(mod, PythonTorchTensorRTModule):
+=======
+    """Walk the compiled graph module to find Python-runtime TorchTensorRTModule instances."""
+    from torch_tensorrt.dynamo.runtime import TorchTensorRTModule
+
+    for name, mod in compiled.named_modules():
+        if isinstance(mod, TorchTensorRTModule) and mod._use_python_runtime:
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
             return mod
     return None
 
@@ -67,7 +79,11 @@ class TestRuntimeCacheSetup(TestCase):
         compiled, _ = _compile_simple()
         mod = _find_python_trt_module(compiled)
         self.assertIsNotNone(
+<<<<<<< HEAD
             mod, "No PythonTorchTensorRTModule found in compiled model"
+=======
+            mod, "No Python-runtime TorchTensorRTModule found in compiled model"
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
         )
         self.assertIsNotNone(mod.runtime_config, "runtime_config should be set for RTX")
         self.assertIsNotNone(mod.runtime_cache, "runtime_cache should be set for RTX")

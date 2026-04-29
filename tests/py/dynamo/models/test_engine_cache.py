@@ -233,10 +233,14 @@ class TestEngineCache(TestCase):
                 exp_program,
                 tuple(inputs),
 <<<<<<< HEAD
+<<<<<<< HEAD
                 use_python_runtime=True,
 =======
                 enabled_precisions={torch.float},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+                use_python_runtime=True,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                 min_block_size=1,
                 immutable_weights=False,
                 cache_built_engines=cache_built_engines,
@@ -311,11 +315,15 @@ class TestEngineCache(TestCase):
                 exp_program,
                 tuple(inputs),
 <<<<<<< HEAD
+<<<<<<< HEAD
                 use_python_runtime=True,
 =======
                 use_explicit_typing=False,
                 enabled_precisions={torch.float},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+                use_python_runtime=True,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                 min_block_size=1,
                 immutable_weights=False,
                 cache_built_engines=cache_built_engines,
@@ -373,10 +381,14 @@ class TestEngineCache(TestCase):
                 torch.export.export(model, args=inputs),
                 inputs=inputs,
 <<<<<<< HEAD
+<<<<<<< HEAD
                 use_python_runtime=False,
 =======
                 enabled_precisions={torch.float},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+                use_python_runtime=False,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                 min_block_size=1,
                 immutable_weights=False,
                 cache_built_engines=True,
@@ -437,11 +449,15 @@ class TestEngineCache(TestCase):
                 backend="tensorrt",
                 options={
 <<<<<<< HEAD
+<<<<<<< HEAD
                     "use_python_runtime": False,
 =======
                     "use_explicit_typing": False,
                     "enabled_precisions": {torch.float},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+                    "use_python_runtime": False,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                     "min_block_size": 1,
                     "immutable_weights": False,
                     "cache_built_engines": cache_built_engines,
@@ -506,11 +522,15 @@ class TestEngineCache(TestCase):
                 backend="tensorrt",
                 options={
 <<<<<<< HEAD
+<<<<<<< HEAD
                     "use_python_runtime": False,
 =======
                     "use_explicit_typing": False,
                     "enabled_precisions": {torch.float},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+                    "use_python_runtime": False,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                     "min_block_size": 1,
                     "immutable_weights": False,
                     "cache_built_engines": cache_built_engines,
@@ -566,11 +586,15 @@ class TestEngineCache(TestCase):
                 inputs=inputs,
                 **{
 <<<<<<< HEAD
+<<<<<<< HEAD
                     "use_python_runtime": True,
 =======
                     "use_explicit_typing": False,
                     "enabled_precisions": {torch.float},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+                    "use_python_runtime": True,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                     "min_block_size": 1,
                     "immutable_weights": False,
                     "cache_built_engines": True,
@@ -612,11 +636,15 @@ class TestEngineCache(TestCase):
                 backend="tensorrt",
                 options={
 <<<<<<< HEAD
+<<<<<<< HEAD
                     "use_python_runtime": True,
 =======
                     "use_explicit_typing": False,
                     "enabled_precisions": {torch.float},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+                    "use_python_runtime": True,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                     "min_block_size": 1,
                     "immutable_weights": False,
                     "cache_built_engines": True,
@@ -716,10 +744,14 @@ class TestEngineCache(TestCase):
             exp_program,
             inputs,
 <<<<<<< HEAD
+<<<<<<< HEAD
             use_python_runtime=True,
 =======
             enabled_precisions={torch.float},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+            use_python_runtime=True,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
             min_block_size=1,
             immutable_weights=False,
             cache_built_engines=False,
@@ -771,10 +803,14 @@ class TestEngineCache(TestCase):
                 exp_program,
                 tuple(inputs),
 <<<<<<< HEAD
+<<<<<<< HEAD
                 use_python_runtime=True,
 =======
                 enabled_precisions={torch.float},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+                use_python_runtime=True,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                 min_block_size=1,
                 cache_built_engines=cache_built_engines,
                 reuse_cached_engines=reuse_cached_engines,
@@ -951,10 +987,14 @@ class TestEngineCache(TestCase):
             llama2_ep,
             inputs=[input_ids],
 <<<<<<< HEAD
+<<<<<<< HEAD
             use_python_runtime=True,
 =======
             enabled_precisions={torch.float32},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+            use_python_runtime=True,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
             min_block_size=1,
             immutable_weights=False,
             truncate_double=True,
@@ -1007,10 +1047,14 @@ class TestEngineCache(TestCase):
                 llama2_ep,
                 inputs=[input_ids],
 <<<<<<< HEAD
+<<<<<<< HEAD
                 use_python_runtime=True,
 =======
                 enabled_precisions={torch.float32},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+                use_python_runtime=True,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                 min_block_size=1,
                 truncate_double=True,
                 device=DEVICE,

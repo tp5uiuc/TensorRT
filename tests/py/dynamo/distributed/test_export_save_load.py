@@ -221,6 +221,10 @@ def _multirank_export_compile_save(
     trt_model = torch_tensorrt.dynamo.compile(
         ep,
         inputs=[inp],
+<<<<<<< HEAD
+=======
+        use_explicit_typing=True,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
         use_fp32_acc=True,
         device=device,
         disable_tf32=True,

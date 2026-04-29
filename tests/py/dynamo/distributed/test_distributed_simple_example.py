@@ -68,10 +68,14 @@ tp_model = torch.compile(
     options={
         "truncate_long_and_double": True,
 <<<<<<< HEAD
+<<<<<<< HEAD
         "use_python_runtime": True,
 =======
         "enabled_precisions": {torch.float32, torch.float16},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+        "use_python_runtime": True,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
         "min_block_size": 1,
         "use_distributed_mode_trace": True,
     },

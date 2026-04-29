@@ -48,10 +48,14 @@ def compile_bert(iterations=3):
         start.record()
         compilation_kwargs = {
 <<<<<<< HEAD
+<<<<<<< HEAD
             "use_python_runtime": False,
 =======
             "enabled_precisions": {torch.float},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+            "use_python_runtime": False,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
             "truncate_double": True,
             "min_block_size": 1,
             "immutable_weights": False,

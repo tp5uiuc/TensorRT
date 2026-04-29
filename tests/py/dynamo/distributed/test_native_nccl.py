@@ -1125,6 +1125,10 @@ class TestNcclOpsSingleRank(unittest.TestCase):
                 backend="torch_tensorrt",
                 dynamic=False,
                 options={
+<<<<<<< HEAD
+=======
+                    "enabled_precisions": {torch.float32},
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                     "use_python_runtime": True,
                     "min_block_size": 1,
                     "use_distributed_mode_trace": True,
@@ -1241,7 +1245,11 @@ class TestPythonRuntimePickle(unittest.TestCase):
             dist.destroy_process_group()
 
     def _compile_small_model(self) -> Any:
+<<<<<<< HEAD
         """Return a compiled PythonTorchTensorRTModule instance."""
+=======
+        """Return a compiled Python-runtime TorchTensorRTModule instance."""
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
         import torch_tensorrt
 
         class LinearModel(nn.Module):
@@ -1256,6 +1264,10 @@ class TestPythonRuntimePickle(unittest.TestCase):
                 backend="torch_tensorrt",
                 dynamic=False,
                 options={
+<<<<<<< HEAD
+=======
+                    "enabled_precisions": {torch.float32},
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                     "use_python_runtime": True,
                     "min_block_size": 1,
                 },
@@ -1269,6 +1281,7 @@ class TestPythonRuntimePickle(unittest.TestCase):
 
         trt_model = self._compile_small_model()
 
+<<<<<<< HEAD
         # Locate the underlying PythonTorchTensorRTModule
         def find_module(obj: Any) -> Any:
             from torch_tensorrt.dynamo.runtime._PythonTorchTensorRTModule import (
@@ -1276,6 +1289,13 @@ class TestPythonRuntimePickle(unittest.TestCase):
             )
 
             if isinstance(obj, PythonTorchTensorRTModule):
+=======
+        # Locate the underlying Python-runtime TorchTensorRTModule
+        def find_module(obj: Any) -> Any:
+            from torch_tensorrt.dynamo.runtime import TorchTensorRTModule
+
+            if isinstance(obj, TorchTensorRTModule) and obj._use_python_runtime:
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                 return obj
             for child in obj.children() if isinstance(obj, nn.Module) else []:
                 result = find_module(child)
@@ -1286,7 +1306,11 @@ class TestPythonRuntimePickle(unittest.TestCase):
         module = find_module(trt_model)
         if module is None:
             self.skipTest(
+<<<<<<< HEAD
                 "Could not locate PythonTorchTensorRTModule in compiled model"
+=======
+                "Could not locate Python-runtime TorchTensorRTModule in compiled model"
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
             )
 
         state = module.__getstate__()
@@ -1303,11 +1327,17 @@ class TestPythonRuntimePickle(unittest.TestCase):
         trt_model = self._compile_small_model()
 
         def find_module(obj: Any) -> Any:
+<<<<<<< HEAD
             from torch_tensorrt.dynamo.runtime._PythonTorchTensorRTModule import (
                 PythonTorchTensorRTModule,
             )
 
             if isinstance(obj, PythonTorchTensorRTModule):
+=======
+            from torch_tensorrt.dynamo.runtime import TorchTensorRTModule
+
+            if isinstance(obj, TorchTensorRTModule) and obj._use_python_runtime:
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                 return obj
             for child in obj.children() if isinstance(obj, nn.Module) else []:
                 result = find_module(child)
@@ -1318,7 +1348,11 @@ class TestPythonRuntimePickle(unittest.TestCase):
         module = find_module(trt_model)
         if module is None:
             self.skipTest(
+<<<<<<< HEAD
                 "Could not locate PythonTorchTensorRTModule in compiled model"
+=======
+                "Could not locate Python-runtime TorchTensorRTModule in compiled model"
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
             )
 
         data = pickle.dumps(module)
@@ -1497,6 +1531,10 @@ def _multirank_distributed_mode_tp_model(
             backend="torch_tensorrt",
             dynamic=False,
             options={
+<<<<<<< HEAD
+=======
+                "enabled_precisions": {torch.float32},
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                 "use_python_runtime": True,
                 "min_block_size": 1,
                 "use_distributed_mode_trace": True,
@@ -1552,6 +1590,10 @@ def _multirank_distributed_mode_subgroup(
             backend="torch_tensorrt",
             dynamic=False,
             options={
+<<<<<<< HEAD
+=======
+                "enabled_precisions": {torch.float32},
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                 "use_python_runtime": True,
                 "min_block_size": 1,
                 "use_distributed_mode_trace": True,
@@ -1593,6 +1635,10 @@ def _multirank_cpp_runtime_bind_nccl(
         backend="torch_tensorrt",
         dynamic=False,
         options={
+<<<<<<< HEAD
+=======
+            "enabled_precisions": {torch.float32},
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
             "use_python_runtime": False,  # C++ runtime
             "min_block_size": 1,
             "use_distributed_mode_trace": True,
@@ -1654,6 +1700,10 @@ def _multirank_distributed_mode_context_switch(
                 backend="torch_tensorrt",
                 dynamic=False,
                 options={
+<<<<<<< HEAD
+=======
+                    "enabled_precisions": {torch.float32},
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                     "use_python_runtime": True,
                     "min_block_size": 1,
                     "use_distributed_mode_trace": True,
@@ -1718,6 +1768,10 @@ def _multirank_pg_migration(rank: int, world_size: int, device: torch.device) ->
                 backend="torch_tensorrt",
                 dynamic=False,
                 options={
+<<<<<<< HEAD
+=======
+                    "enabled_precisions": {torch.float32},
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                     "use_python_runtime": use_python_runtime,
                     "min_block_size": 1,
                     "use_distributed_mode_trace": True,

@@ -58,6 +58,7 @@ class TestResourcePartitioning(TestCase):
         inputs = [torch.randn((1, 1024, 224, 224)).to("cuda")]
 
 <<<<<<< HEAD
+<<<<<<< HEAD
         use_python_runtime = False
 
         exp_program = torch.export.export(model, tuple(inputs))
@@ -71,6 +72,14 @@ class TestResourcePartitioning(TestCase):
         compilation_options = {
             "enabled_precisions": enabled_precisions,
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+        use_python_runtime = False
+
+        exp_program = torch.export.export(model, tuple(inputs))
+
+        compilation_options = {
+            "use_python_runtime": use_python_runtime,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
             "min_block_size": 1,
             "immutable_weights": True,
             "reuse_cached_engines": False,
@@ -150,6 +159,7 @@ class TestResourcePartitioning(TestCase):
         inputs = [torch.randn((1, 1024, 224, 224)).to("cuda")]
 
 <<<<<<< HEAD
+<<<<<<< HEAD
         use_python_runtime = False
 
         exp_program = torch.export.export(model, tuple(inputs))
@@ -163,6 +173,14 @@ class TestResourcePartitioning(TestCase):
         compilation_options = {
             "enabled_precisions": enabled_precisions,
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+        use_python_runtime = False
+
+        exp_program = torch.export.export(model, tuple(inputs))
+
+        compilation_options = {
+            "use_python_runtime": use_python_runtime,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
             "min_block_size": 1,
             "immutable_weights": True,
             "reuse_cached_engines": False,
@@ -293,6 +311,7 @@ class TestResourcePartitioning(TestCase):
         inputs = [torch.randn((1, 1024, 224, 224)).to("cuda")]
 
 <<<<<<< HEAD
+<<<<<<< HEAD
         use_python_runtime = False
 
         exp_program = torch.export.export(model, tuple(inputs))
@@ -306,6 +325,14 @@ class TestResourcePartitioning(TestCase):
         compilation_options = {
             "enabled_precisions": enabled_precisions,
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+        use_python_runtime = False
+
+        exp_program = torch.export.export(model, tuple(inputs))
+
+        compilation_options = {
+            "use_python_runtime": use_python_runtime,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
             "min_block_size": 1,
             "immutable_weights": True,
             "reuse_cached_engines": False,
@@ -403,6 +430,7 @@ class TestResourcePartitioning(TestCase):
         inputs = [torch.randn((1, 1024, 224, 224)).to("cuda")]
 
 <<<<<<< HEAD
+<<<<<<< HEAD
         use_python_runtime = False
 
         exp_program = torch.export.export(model, tuple(inputs))
@@ -416,6 +444,14 @@ class TestResourcePartitioning(TestCase):
         compilation_options = {
             "enabled_precisions": enabled_precisions,
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+        use_python_runtime = False
+
+        exp_program = torch.export.export(model, tuple(inputs))
+
+        compilation_options = {
+            "use_python_runtime": use_python_runtime,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
             "min_block_size": 1,
             "immutable_weights": True,
             "reuse_cached_engines": False,

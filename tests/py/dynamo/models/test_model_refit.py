@@ -50,6 +50,8 @@ def test_mapping():
         for i in inputs
     ]
     min_block_size = 1
+    use_python_runtime = False
+
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
@@ -76,7 +78,7 @@ def test_mapping():
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
-        enabled_precisions=enabled_precisions,
+        use_python_runtime=use_python_runtime,
         min_block_size=min_block_size,
         immutable_weights=False,
     )
@@ -133,6 +135,8 @@ def test_conv_refit_with_weightmap():
     model2 = net().eval().to("cuda")
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
+    use_python_runtime = True
+
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
@@ -159,7 +163,7 @@ def test_conv_refit_with_weightmap():
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
-        enabled_precisions=enabled_precisions,
+        use_python_runtime=use_python_runtime,
         min_block_size=min_block_size,
         immutable_weights=False,
     )
@@ -215,6 +219,8 @@ def test_batch_norm_refit_one_engine_with_weightmap():
     model2 = net().eval().to("cuda")
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
+    use_python_runtime = True
+
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
@@ -241,7 +247,7 @@ def test_batch_norm_refit_one_engine_with_weightmap():
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
-        enabled_precisions=enabled_precisions,
+        use_python_runtime=use_python_runtime,
         min_block_size=min_block_size,
         immutable_weights=False,
     )
@@ -297,6 +303,8 @@ def test_batch_norm_refit_one_engine_without_weightmap():
     model2 = net().eval().to("cuda")
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
+    use_python_runtime = True
+
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
@@ -323,7 +331,7 @@ def test_batch_norm_refit_one_engine_without_weightmap():
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
-        enabled_precisions=enabled_precisions,
+        use_python_runtime=use_python_runtime,
         min_block_size=min_block_size,
         immutable_weights=False,
     )
@@ -370,6 +378,8 @@ def test_refit_one_engine_with_weightmap():
     model2 = models.resnet18(pretrained=True).eval().to("cuda")
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
+    use_python_runtime = True
+
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
@@ -396,7 +406,7 @@ def test_refit_one_engine_with_weightmap():
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
-        enabled_precisions=enabled_precisions,
+        use_python_runtime=use_python_runtime,
         min_block_size=min_block_size,
         immutable_weights=False,
     )
@@ -443,6 +453,8 @@ def test_refit_one_engine_no_map_with_weightmap():
     model2 = models.resnet18(pretrained=True).eval().to("cuda")
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
+    use_python_runtime = False
+
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
@@ -469,7 +481,7 @@ def test_refit_one_engine_no_map_with_weightmap():
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
-        enabled_precisions=enabled_precisions,
+        use_python_runtime=use_python_runtime,
         min_block_size=min_block_size,
         immutable_weights=False,
     )
@@ -517,6 +529,8 @@ def test_refit_one_engine_with_wrong_weightmap():
     model2 = models.resnet18(pretrained=True).eval().to("cuda")
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
+    use_python_runtime = True
+
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
@@ -543,7 +557,7 @@ def test_refit_one_engine_with_wrong_weightmap():
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
-        enabled_precisions=enabled_precisions,
+        use_python_runtime=use_python_runtime,
         min_block_size=min_block_size,
         immutable_weights=False,
     )
@@ -600,6 +614,8 @@ def test_refit_one_engine_bert_with_weightmap():
     model2 = BertModel.from_pretrained("bert-base-uncased").eval().to("cuda")
     nn.init.xavier_normal_(model2.embeddings.word_embeddings.weight)
     min_block_size = 1
+    use_python_runtime = True
+
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
@@ -626,7 +642,7 @@ def test_refit_one_engine_bert_with_weightmap():
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
-        enabled_precisions=enabled_precisions,
+        use_python_runtime=use_python_runtime,
         min_block_size=min_block_size,
         immutable_weights=False,
     )
@@ -682,6 +698,8 @@ def test_refit_one_engine_inline_runtime_with_weightmap(tmpdir):
     model2 = models.resnet18(pretrained=True).eval().to("cuda")
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
+    use_python_runtime = False
+
     exp_program = torch.export.export(model, tuple(inputs), strict=False)
     exp_program2 = torch.export.export(model2, tuple(inputs), strict=False)
 
@@ -708,7 +726,7 @@ def test_refit_one_engine_inline_runtime_with_weightmap(tmpdir):
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
-        enabled_precisions=enabled_precisions,
+        use_python_runtime=use_python_runtime,
         min_block_size=min_block_size,
         immutable_weights=False,
     )
@@ -757,6 +775,8 @@ def test_refit_one_engine_python_runtime_with_weightmap():
     model2 = models.resnet18(pretrained=True).eval().to("cuda")
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
+    use_python_runtime = True
+
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
@@ -783,7 +803,7 @@ def test_refit_one_engine_python_runtime_with_weightmap():
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
-        enabled_precisions=enabled_precisions,
+        use_python_runtime=use_python_runtime,
         min_block_size=min_block_size,
         immutable_weights=False,
     )
@@ -845,6 +865,8 @@ def test_refit_multiple_engine_with_weightmap():
 
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
+    use_python_runtime = False
+
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
@@ -859,8 +881,12 @@ def test_refit_multiple_engine_with_weightmap():
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
+<<<<<<< HEAD
         enabled_precisions=enabled_precisions,
 >>>>>>> 231434eae (Changed tests and docs)
+=======
+        use_python_runtime=use_python_runtime,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
         min_block_size=min_block_size,
         immutable_weights=False,
         torch_executed_ops=torch_executed_ops,
@@ -930,6 +956,8 @@ def test_refit_multiple_engine_with_weightmap_cpu_offload():
 
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
+    use_python_runtime = False
+
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
@@ -944,8 +972,12 @@ def test_refit_multiple_engine_with_weightmap_cpu_offload():
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
+<<<<<<< HEAD
         enabled_precisions=enabled_precisions,
 >>>>>>> 231434eae (Changed tests and docs)
+=======
+        use_python_runtime=use_python_runtime,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
         min_block_size=min_block_size,
         immutable_weights=False,
         torch_executed_ops=torch_executed_ops,
@@ -1012,6 +1044,8 @@ def test_refit_one_engine_without_weightmap():
     model2 = models.resnet18(pretrained=False).eval().to("cuda")
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
+    use_python_runtime = False
+
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
@@ -1038,7 +1072,7 @@ def test_refit_one_engine_without_weightmap():
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
-        enabled_precisions=enabled_precisions,
+        use_python_runtime=use_python_runtime,
         min_block_size=min_block_size,
         immutable_weights=False,
     )
@@ -1089,6 +1123,8 @@ def test_refit_one_engine_bert_without_weightmap():
     model2 = BertModel.from_pretrained("bert-base-uncased").eval().to("cuda")
     nn.init.xavier_normal_(model2.embeddings.word_embeddings.weight)
     min_block_size = 1
+    use_python_runtime = False
+
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
@@ -1115,7 +1151,7 @@ def test_refit_one_engine_bert_without_weightmap():
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
-        enabled_precisions=enabled_precisions,
+        use_python_runtime=use_python_runtime,
         min_block_size=min_block_size,
         immutable_weights=False,
     )
@@ -1170,6 +1206,8 @@ def test_refit_one_engine_inline_runtime_without_weightmap(tmpdir):
     model2 = models.resnet18(pretrained=False).eval().to("cuda")
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
+    use_python_runtime = False
+
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
@@ -1196,7 +1234,7 @@ def test_refit_one_engine_inline_runtime_without_weightmap(tmpdir):
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
-        enabled_precisions=enabled_precisions,
+        use_python_runtime=use_python_runtime,
         min_block_size=min_block_size,
         immutable_weights=False,
     )
@@ -1243,6 +1281,8 @@ def test_refit_one_engine_python_runtime_without_weightmap():
     model2 = models.resnet18(pretrained=False).eval().to("cuda")
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
+    use_python_runtime = True
+
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
@@ -1269,7 +1309,7 @@ def test_refit_one_engine_python_runtime_without_weightmap():
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
-        enabled_precisions=enabled_precisions,
+        use_python_runtime=use_python_runtime,
         min_block_size=min_block_size,
         immutable_weights=False,
     )
@@ -1331,6 +1371,8 @@ def test_refit_multiple_engine_without_weightmap():
 
     inputs = [torch.randn((1, 3, 224, 224)).to("cuda")]
     min_block_size = 1
+    use_python_runtime = False
+
     exp_program = torch.export.export(model, tuple(inputs))
     exp_program2 = torch.export.export(model2, tuple(inputs))
 
@@ -1345,8 +1387,12 @@ def test_refit_multiple_engine_without_weightmap():
     trt_gm = torchtrt.dynamo.compile(
         exp_program,
         tuple(inputs),
+<<<<<<< HEAD
         enabled_precisions=enabled_precisions,
 >>>>>>> 231434eae (Changed tests and docs)
+=======
+        use_python_runtime=use_python_runtime,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
         min_block_size=min_block_size,
         immutable_weights=False,
         torch_executed_ops=torch_executed_ops,

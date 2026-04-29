@@ -53,10 +53,14 @@ def test_no_pytorch_autocast():
             arg_inputs=inputs,
             min_block_size=1,
 <<<<<<< HEAD
+<<<<<<< HEAD
             use_python_runtime=True,
 =======
             use_explicit_typing=True,
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+            use_python_runtime=True,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
             enable_autocast=True,
             autocast_low_precision_type=torch.float16,
             autocast_excluded_nodes={"^conv1$", "relu"},
@@ -147,10 +151,14 @@ def test_whole_pytorch_autocast():
             arg_inputs=inputs,
             min_block_size=1,
 <<<<<<< HEAD
+<<<<<<< HEAD
             use_python_runtime=True,
 =======
             use_explicit_typing=True,
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+            use_python_runtime=True,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
             # Torch-TensorRT's autocast doesn't affect layers inside Pytorch autocast
             enable_autocast=True,
             autocast_low_precision_type=torch.bfloat16,
@@ -230,10 +238,14 @@ def test_mixed_pytorch_autocast():
             arg_inputs=inputs,
             min_block_size=1,
 <<<<<<< HEAD
+<<<<<<< HEAD
             use_python_runtime=False,
 =======
             use_explicit_typing=True,
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+            use_python_runtime=False,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
             # Torch-TensorRT's autocast doesn't affect layers inside Pytorch autocast
             enable_autocast=True,
             autocast_low_precision_type=torch.bfloat16,
@@ -341,10 +353,14 @@ def test_nested_pytorch_autocast():
             arg_inputs=inputs,
             min_block_size=1,
 <<<<<<< HEAD
+<<<<<<< HEAD
             use_python_runtime=False,
 =======
             use_explicit_typing=True,
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+            use_python_runtime=False,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
             # Torch-TensorRT's autocast doesn't affect layers inside Pytorch autocast
             enable_autocast=True,
             autocast_low_precision_type=torch.bfloat16,

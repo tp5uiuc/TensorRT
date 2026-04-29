@@ -77,6 +77,7 @@ class TestLazyEngineInit(TestCase):
             ["a", "b"],
             ["output0"],
             settings=CompilationSettings(lazy_engine_init=True),
+            use_python_runtime=True,
         )
 
         assertions.assertTrue(
@@ -133,6 +134,7 @@ class TestLazyEngineInit(TestCase):
             ["x"],
             ["output0"],
             settings=CompilationSettings(lazy_engine_init=True),
+            use_python_runtime=True,
         )
 
         assertions.assertTrue(
@@ -225,6 +227,7 @@ class TestLazyEngineInit(TestCase):
             "min_block_size": 1,
             "ir": "dynamo",
             "lazy_engine_init": True,
+            "use_python_runtime": True,
             "cache_built_engines": False,
             "reuse_cached_engines": False,
         }
@@ -263,6 +266,7 @@ class TestLazyEngineInit(TestCase):
             "min_block_size": 1,
             "ir": "dynamo",
             "lazy_engine_init": True,
+            "use_python_runtime": False,
             "cache_built_engines": False,
             "reuse_cached_engines": False,
         }
@@ -301,6 +305,7 @@ class TestLazyEngineInit(TestCase):
             "min_block_size": 1,
             "ir": "dynamo",
             "lazy_engine_init": True,
+            "use_python_runtime": False,
             "cache_built_engines": False,
             "reuse_cached_engines": False,
         }
@@ -348,6 +353,7 @@ class TestLazyEngineInit(TestCase):
             "min_block_size": 1,
             "ir": "dynamo",
             "lazy_engine_init": True,
+            "use_python_runtime": True,
             "torch_executed_ops": {"torch.ops.aten.sub.Tensor"},
             "cache_built_engines": False,
             "reuse_cached_engines": False,
@@ -390,6 +396,7 @@ class TestLazyEngineInit(TestCase):
             "min_block_size": 1,
             "ir": "dynamo",
             "lazy_engine_init": True,
+            "use_python_runtime": False,
             "torch_executed_ops": {"torch.ops.aten.sub.Tensor"},
             "cache_built_engines": False,
             "reuse_cached_engines": False,

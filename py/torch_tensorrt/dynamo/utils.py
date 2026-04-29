@@ -603,15 +603,6 @@ def parse_dynamo_kwargs(
         if "options" in kwargs and len(kwargs) == 1:
             kwargs = kwargs["options"]
 
-        if "use_python_runtime" in kwargs:
-            warnings.warn(
-                'torch.compile option "use_python_runtime" was removed; use '
-                "the Python runtime is now selected automatically when the C++ extension is unavailable.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            kwargs = {k: v for k, v in kwargs.items() if k != "use_python_runtime"}
-
         if "truncate_long_and_double" in kwargs:
             if (
                 "truncate_double" in kwargs

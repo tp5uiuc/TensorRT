@@ -222,10 +222,14 @@ def test_resnet18():
 
     compile_spec = {
 <<<<<<< HEAD
+<<<<<<< HEAD
         "use_python_runtime": False,
 =======
         "enabled_precisions": {torch.float32},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+        "use_python_runtime": False,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
         "immutable_weights": False,
     }
 
@@ -272,10 +276,14 @@ def test_save():
     # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     compile_spec = {
 <<<<<<< HEAD
+<<<<<<< HEAD
         "use_python_runtime": False,
 =======
         "enabled_precisions": {torch.float32},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+        "use_python_runtime": False,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
         "immutable_weights": False,
     }
 
@@ -315,10 +323,14 @@ def test_resnet18_modify_attribute():
 
     compile_spec = {
 <<<<<<< HEAD
+<<<<<<< HEAD
         "use_python_runtime": False,
 =======
         "enabled_precisions": {torch.float32},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+        "use_python_runtime": False,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
         "immutable_weights": False,
     }
 
@@ -363,10 +375,14 @@ def test_resnet18_modify_attribute_no_refit():
 
     compile_spec = {
 <<<<<<< HEAD
+<<<<<<< HEAD
         "use_python_runtime": False,
 =======
         "enabled_precisions": {torch.float32},
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
+=======
+        "use_python_runtime": False,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
         "immutable_weights": False,
     }
 

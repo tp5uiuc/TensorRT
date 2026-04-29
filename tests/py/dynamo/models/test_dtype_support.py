@@ -41,6 +41,7 @@ class Test64BitSupport(TestCase):
             pass_through_build_failures=True,
             truncate_double=True,
             min_block_size=1,
+            use_python_runtime=False,
             cache_built_engines=False,
             reuse_cached_engines=False,
         )
@@ -80,6 +81,7 @@ class Test64BitSupport(TestCase):
             pass_through_build_failures=True,
             truncate_double=True,
             min_block_size=1,
+            use_python_runtime=True,
             cache_built_engines=False,
             reuse_cached_engines=False,
         )
@@ -125,6 +127,7 @@ class Test64BitSupport(TestCase):
             pass_through_build_failures=True,
             truncate_double=False,
             min_block_size=1,
+            use_python_runtime=False,
             cache_built_engines=False,
             reuse_cached_engines=False,
         )
@@ -165,6 +168,7 @@ class Test64BitSupport(TestCase):
             pass_through_build_failures=True,
             truncate_double=False,
             min_block_size=1,
+            use_python_runtime=True,
             cache_built_engines=False,
             reuse_cached_engines=False,
         )
@@ -218,6 +222,7 @@ class TestBF16Support(TestCase):
             inputs=[in_tensor],
             pass_through_build_failures=True,
             min_block_size=1,
+            use_python_runtime=False,
             cache_built_engines=False,
             reuse_cached_engines=False,
         )
@@ -256,6 +261,7 @@ class TestBF16Support(TestCase):
             inputs=[in_tensor],
             pass_through_build_failures=True,
             min_block_size=1,
+            use_python_runtime=True,
             cache_built_engines=False,
             reuse_cached_engines=False,
         )

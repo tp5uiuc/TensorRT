@@ -28,6 +28,7 @@ import pytest
 import torch
 import torch.nn as nn
 import torch_tensorrt as torchtrt
+<<<<<<< HEAD
 from torch_tensorrt.dynamo.lowering.passes.complex_graph_rewrite import (
     complex_graph_detection,
 )
@@ -42,6 +43,14 @@ except ImportError:  # pragma: no cover
     _PYTHON_RUNTIME_AVAILABLE = False
 
 
+=======
+from torch_tensorrt.dynamo._settings import CompilationSettings
+from torch_tensorrt.dynamo.lowering.passes.complex_graph_rewrite import (
+    complex_graph_detection,
+)
+from torch_tensorrt.dynamo.utils import COSINE_THRESHOLD, cosine_similarity
+
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -63,11 +72,21 @@ def _cossim_real(py_out: torch.Tensor, trt_out: torch.Tensor, tag: str) -> None:
 
 
 def _count_trt_modules(mod: torch.nn.Module) -> int:
+<<<<<<< HEAD
     """Return the number of ``PythonTorchTensorRTModule`` submodules (-1 if unavailable)."""
     if not _PYTHON_RUNTIME_AVAILABLE:
         return -1
     return sum(
         1 for _, m in mod.named_modules() if isinstance(m, PythonTorchTensorRTModule)
+=======
+    """Return the number of Python-runtime TorchTensorRTModule submodules."""
+    from torch_tensorrt.dynamo.runtime import TorchTensorRTModule
+
+    return sum(
+        1
+        for _, m in mod.named_modules()
+        if isinstance(m, TorchTensorRTModule) and m._use_python_runtime
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
     )
 
 
@@ -205,7 +224,11 @@ def test_complex_partial_lowering_with_graph_break() -> None:
 
     Asserts:
       1. The compiled model is numerically correct (cosine sim > threshold).
+<<<<<<< HEAD
       2. At least one ``PythonTorchTensorRTModule`` submodule exists — confirming
+=======
+      2. At least one Python-runtime ``TorchTensorRTModule`` submodule exists — confirming
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
          the lowerable complex ops were compiled to TRT, not all relegated to
          PyTorch fallback.
       3. After lowering, cumsum receives a complex-dtype tensor (the

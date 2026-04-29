@@ -57,6 +57,7 @@ model = models.resnet18(pretrained=False).to("cuda").eval()
 exp_program = torch.export.export(model, tuple(inputs))
 workspace_size = 20 << 30
 min_block_size = 0
+use_python_runtime = False
 torch_executed_ops = {}
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -68,8 +69,12 @@ trt_gm = torch_trt.dynamo.compile(
 trt_gm = torch_trt.dynamo.compile(
     exp_program,
     tuple(inputs),
+<<<<<<< HEAD
     enabled_precisions=enabled_precisions,
 >>>>>>> 231434eae (Changed tests and docs)
+=======
+    use_python_runtime=use_python_runtime,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
     min_block_size=min_block_size,
     torch_executed_ops=torch_executed_ops,
     immutable_weights=False,

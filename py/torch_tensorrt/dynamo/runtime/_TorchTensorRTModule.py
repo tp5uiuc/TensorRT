@@ -114,6 +114,7 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
         requires_native_multidevice: bool = False,
         symbolic_shape_expressions: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 <<<<<<< HEAD
+<<<<<<< HEAD
     ):
         """Takes a name, target device, serialized TensorRT engine, and binding names / order and constructs
         a PyTorch ``torch.nn.Module`` around it. Uses the Torch-TensorRT runtime extension to run the engines
@@ -152,6 +153,9 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
                     settings=CompilationSettings(device=torch.cuda.current_device)
                 )
 =======
+=======
+        use_python_runtime: bool = False,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
     ) -> None:
         """Build the module from serialized engine bytes and binding metadata.
 >>>>>>> ef0662c02 (docs: [Automated] Regenerating documenation for d97cb7a)
@@ -165,6 +169,8 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
             weight_name_map: Engine weight name to ``state_dict`` key mapping (refit).
             requires_output_allocator: Engine needs TRT dynamic output allocation.
             symbolic_shape_expressions: Optional symbolic shape metadata from compile.
+            use_python_runtime: If ``True``, force use of the Python TRTEngine; if ``False``
+                use the C++ runtime when available, falling back to Python automatically.
         """
         super().__init__()
 
@@ -180,6 +186,9 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
         self.weight_name_map = weight_name_map
         self.serialized_engine = serialized_engine
         self.engine = None
+        self._use_python_runtime = (
+            use_python_runtime or not ENABLED_FEATURES.torch_tensorrt_runtime
+        )
         self.requires_output_allocator = requires_output_allocator
         self.dynamically_allocate_resources = settings.dynamically_allocate_resources
         self.symbolic_shape_expressions = symbolic_shape_expressions
@@ -357,15 +366,17 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
         if self.engine is not None:
             return
 
-        if ENABLED_FEATURES.torch_tensorrt_runtime:
-            self.engine = torch.classes.tensorrt.Engine(self._pack_engine_info())
-        else:
+        if self._use_python_runtime:
             from torch_tensorrt.dynamo.runtime._TRTEngine import TRTEngine
 
             self.engine = TRTEngine(
                 self._pack_engine_info(),
                 profile_execution=self.profiling_enabled,
             )  # type: ignore[assignment]
+            self.forward = self._python_forward  # type: ignore[method-assign]
+        else:
+            self.engine = torch.classes.tensorrt.Engine(self._pack_engine_info())
+            self.forward = self._cpp_forward  # type: ignore[method-assign]
 
         # requires_native_multidevice is set by the C++ constructor from the serialized REQUIRES_NATIVE_MULTIDEVICE_IDX field.
         if self.engine.requires_native_multidevice:
@@ -460,12 +471,18 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
             self.weight_name_map = metadata["weight_name_map"]
             self.symbolic_shape_expressions = metadata["inout_symexprs"]
 
-            if ENABLED_FEATURES.torch_tensorrt_runtime:
-                self.engine = torch.classes.tensorrt.Engine(serialized_engine_info)
-            else:
+            self._use_python_runtime = (
+                getattr(self.settings, "use_python_runtime", False)
+                or not ENABLED_FEATURES.torch_tensorrt_runtime
+            )
+            if self._use_python_runtime:
                 from torch_tensorrt.dynamo.runtime._TRTEngine import TRTEngine
 
                 self.engine = TRTEngine(serialized_engine_info)  # type: ignore[assignment]
+                self.forward = self._python_forward  # type: ignore[method-assign]
+            else:
+                self.engine = torch.classes.tensorrt.Engine(serialized_engine_info)
+                self.forward = self._cpp_forward  # type: ignore[method-assign]
 
             self.engine.set_output_tensors_as_unowned(
                 metadata["output_tensors_are_unowned"]
@@ -492,18 +509,16 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
     def set_use_output_allocator(self, enable: bool) -> None:
         self.engine.use_output_allocator_outputs = enable
 
-    def forward(self, *inputs: Any) -> torch.Tensor | Tuple[torch.Tensor, ...]:
-        """Run the TensorRT engine on GPU tensors (non-tensor args are cast to CUDA tensors)."""
+    def _prepare_inputs(self, inputs: tuple[Any, ...]) -> list[torch.Tensor]:
+        """Validate and move inputs to the target device."""
         if self.engine is None:
             raise RuntimeError("Engine has not been setup yet.")
-
-        target = self.target_device
         binding_names = self.input_binding_names
-        # len-check inlined (cheaper than keeping an f-string around the hot path)
         if len(inputs) != len(binding_names):
             raise AssertionError(
                 f"Wrong number of inputs, expected {len(binding_names)} got {len(inputs)}."
             )
+<<<<<<< HEAD
 
 <<<<<<< HEAD
 <<<<<<< HEAD
@@ -544,6 +559,11 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
 =======
         input_tensors = list(inputs)
         for i, value in enumerate(input_tensors):
+=======
+        target = self.target_device
+        input_tensors: list[torch.Tensor] = []
+        for i, value in enumerate(inputs):
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
             if isinstance(value, torch.Tensor):
                 if value.device != target:
                     logger.warning(
@@ -553,15 +573,35 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
                         value.device,
                         target,
                     )
-                    input_tensors[i] = value.to(target)
+                    input_tensors.append(value.to(target))
+                else:
+                    input_tensors.append(value)
             else:
-                input_tensors[i] = torch.tensor(value, device=target)
+                input_tensors.append(torch.tensor(value, device=target))
+        return input_tensors
 
+    def _cpp_forward(self, *inputs: Any) -> torch.Tensor | Tuple[torch.Tensor, ...]:
+        """Execute via the C++ TensorRT runtime (``torch.ops.tensorrt.execute_engine``)."""
+        input_tensors = self._prepare_inputs(inputs)
         outputs = torch.ops.tensorrt.execute_engine(input_tensors, self.engine)
 >>>>>>> 867719852 (run all tests and fixed bugs)
         if len(outputs) == 1:
             return outputs[0]
         return tuple(outputs)
+
+    def _python_forward(self, *inputs: Any) -> torch.Tensor | Tuple[torch.Tensor, ...]:
+        """Execute via the Python TRTEngine (``torch.ops.tensorrt.execute_engine_python``)."""
+        input_tensors = self._prepare_inputs(inputs)
+        outputs = torch.ops.tensorrt.execute_engine_python(input_tensors, self.engine)
+        if len(outputs) == 1:
+            return outputs[0]
+        return tuple(outputs)
+
+    def forward(self, *inputs: Any) -> torch.Tensor | Tuple[torch.Tensor, ...]:
+        """Placeholder for forward"""
+        raise NotImplementedError(
+            "Forward method should be replaced by _cpp_forward or _python_forward."
+        )
 
     def enable_profiling(
         self,

@@ -39,6 +39,7 @@ torch.manual_seed(0)
 
 model = models.resnet18(pretrained=True).to("cuda").eval()
 min_block_size = 1
+use_python_runtime = False
 
 
 def remove_timing_cache(path=TIMING_CACHE_PATH):
@@ -95,10 +96,14 @@ def torch_compile(iterations=3):
             backend="tensorrt",
             options={
 <<<<<<< HEAD
+<<<<<<< HEAD
                 "use_python_runtime": True,
 =======
                 "enabled_precisions": enabled_precisions,
 >>>>>>> 231434eae (Changed tests and docs)
+=======
+                "use_python_runtime": True,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                 "min_block_size": min_block_size,
                 "immutable_weights": False,
                 "cache_built_engines": cache_built_engines,
@@ -183,8 +188,12 @@ def dynamo_compile(iterations=3):
         trt_gm = torch_trt.dynamo.compile(
             exp_program,
             tuple(inputs),
+<<<<<<< HEAD
             enabled_precisions=enabled_precisions,
 >>>>>>> 231434eae (Changed tests and docs)
+=======
+            use_python_runtime=use_python_runtime,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
             min_block_size=min_block_size,
             immutable_weights=False,
             cache_built_engines=cache_built_engines,
@@ -314,10 +323,14 @@ def torch_compile_my_cache(iterations=3):
             backend="tensorrt",
             options={
 <<<<<<< HEAD
+<<<<<<< HEAD
                 "use_python_runtime": True,
 =======
                 "enabled_precisions": enabled_precisions,
 >>>>>>> 231434eae (Changed tests and docs)
+=======
+                "use_python_runtime": True,
+>>>>>>> a328e8028 (Patched so that py and c++ runtime are divided)
                 "min_block_size": min_block_size,
                 "immutable_weights": False,
                 "cache_built_engines": cache_built_engines,
