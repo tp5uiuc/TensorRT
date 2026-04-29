@@ -57,11 +57,12 @@ class TestResourcePartitioning(TestCase):
         model.to("cuda")
         inputs = [torch.randn((1, 1024, 224, 224)).to("cuda")]
 
-        enabled_precisions = {torch.float}
+        use_python_runtime = False
+
         exp_program = torch.export.export(model, tuple(inputs))
 
         compilation_options = {
-            "enabled_precisions": enabled_precisions,
+            "use_python_runtime": use_python_runtime,
             "min_block_size": 1,
             "immutable_weights": True,
             "reuse_cached_engines": False,
@@ -140,11 +141,12 @@ class TestResourcePartitioning(TestCase):
         model.to("cuda")
         inputs = [torch.randn((1, 1024, 224, 224)).to("cuda")]
 
-        enabled_precisions = {torch.float}
+        use_python_runtime = False
+
         exp_program = torch.export.export(model, tuple(inputs))
 
         compilation_options = {
-            "enabled_precisions": enabled_precisions,
+            "use_python_runtime": use_python_runtime,
             "min_block_size": 1,
             "immutable_weights": True,
             "reuse_cached_engines": False,
@@ -274,11 +276,12 @@ class TestResourcePartitioning(TestCase):
         model.to("cuda")
         inputs = [torch.randn((1, 1024, 224, 224)).to("cuda")]
 
-        enabled_precisions = {torch.float}
+        use_python_runtime = False
+
         exp_program = torch.export.export(model, tuple(inputs))
 
         compilation_options = {
-            "enabled_precisions": enabled_precisions,
+            "use_python_runtime": use_python_runtime,
             "min_block_size": 1,
             "immutable_weights": True,
             "reuse_cached_engines": False,
@@ -375,11 +378,12 @@ class TestResourcePartitioning(TestCase):
         model.to("cuda")
         inputs = [torch.randn((1, 1024, 224, 224)).to("cuda")]
 
-        enabled_precisions = {torch.float}
+        use_python_runtime = False
+
         exp_program = torch.export.export(model, tuple(inputs))
 
         compilation_options = {
-            "enabled_precisions": enabled_precisions,
+            "use_python_runtime": use_python_runtime,
             "min_block_size": 1,
             "immutable_weights": True,
             "reuse_cached_engines": False,

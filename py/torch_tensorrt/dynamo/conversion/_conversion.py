@@ -363,4 +363,5 @@ def convert_module(
         requires_output_allocator=serialized_interpreter_result.requires_output_allocator,
         requires_native_multidevice=serialized_interpreter_result.requires_native_multidevice,
         symbolic_shape_expressions=serialized_interpreter_result.symbolic_shape_expressions,
+        use_python_runtime=settings.use_python_runtime,
     )

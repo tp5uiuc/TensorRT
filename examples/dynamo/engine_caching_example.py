@@ -39,6 +39,7 @@ torch.manual_seed(0)
 
 model = models.resnet18(pretrained=True).to("cuda").eval()
 min_block_size = 1
+use_python_runtime = False
 
 
 def remove_timing_cache(path=TIMING_CACHE_PATH):
@@ -90,7 +91,7 @@ def torch_compile(iterations=3):
             model,
             backend="tensorrt",
             options={
-                "enabled_precisions": enabled_precisions,
+                "use_python_runtime": True,
                 "min_block_size": min_block_size,
                 "immutable_weights": False,
                 "cache_built_engines": cache_built_engines,
@@ -149,7 +150,7 @@ def dynamo_compile(iterations=3):
         trt_gm = torch_trt.dynamo.compile(
             exp_program,
             tuple(inputs),
-            enabled_precisions=enabled_precisions,
+            use_python_runtime=use_python_runtime,
             min_block_size=min_block_size,
             immutable_weights=False,
             cache_built_engines=cache_built_engines,
@@ -258,7 +259,7 @@ def torch_compile_my_cache(iterations=3):
             model,
             backend="tensorrt",
             options={
-                "enabled_precisions": enabled_precisions,
+                "use_python_runtime": True,
                 "min_block_size": min_block_size,
                 "immutable_weights": False,
                 "cache_built_engines": cache_built_engines,

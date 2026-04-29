@@ -42,6 +42,7 @@ class TestRuntimeCacheModels(TestCase):
             model,
             ir="dynamo",
             inputs=[torchtrt.Input(input_tensor.shape, dtype=torch.float32)],
+            enabled_precisions={torch.float32},
             use_python_runtime=True,
             min_block_size=1,
             runtime_cache_path=self.cache_path,
@@ -75,6 +76,7 @@ class TestRuntimeCacheModels(TestCase):
         compile_kwargs = {
             "ir": "dynamo",
             "inputs": [torchtrt.Input(input_tensor.shape, dtype=torch.float32)],
+            "enabled_precisions": {torch.float32},
             "use_python_runtime": True,
             "min_block_size": 1,
             "runtime_cache_path": self.cache_path,
@@ -116,6 +118,7 @@ class TestRuntimeCacheModels(TestCase):
             model,
             ir="dynamo",
             inputs=[torchtrt.Input(input_tensor.shape, dtype=torch.float32)],
+            enabled_precisions={torch.float32},
             use_python_runtime=True,
             min_block_size=1,
             runtime_cache_path=self.cache_path,
@@ -173,6 +176,7 @@ class TestRuntimeCacheDynamicShapes(TestCase):
                     dtype=torch.float32,
                 )
             ],
+            enabled_precisions={torch.float32},
             use_python_runtime=True,
             min_block_size=1,
             runtime_cache_path=self.cache_path,
@@ -226,6 +230,7 @@ class TestRuntimeCacheDynamicShapes(TestCase):
                     dtype=torch.float32,
                 )
             ],
+            "enabled_precisions": {torch.float32},
             "use_python_runtime": True,
             "min_block_size": 1,
             "runtime_cache_path": self.cache_path,
@@ -287,6 +292,7 @@ class TestRuntimeCachePerformance(TestCase):
         compile_kwargs = {
             "ir": "dynamo",
             "inputs": [torchtrt.Input(input_tensor.shape, dtype=torch.float32)],
+            "enabled_precisions": {torch.float32},
             "use_python_runtime": True,
             "min_block_size": 1,
             "runtime_cache_path": self.cache_path,

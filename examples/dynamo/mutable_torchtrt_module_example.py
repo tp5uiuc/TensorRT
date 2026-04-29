@@ -32,7 +32,7 @@ inputs = [torch.rand((1, 3, 224, 224)).to("cuda")]
 # Initialize the Mutable Torch TensorRT Module with settings.
 # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 settings = {
-    "enabled_precisions": {torch.float32},
+    "use_python_runtime": False,
     "immutable_weights": False,
 }
 
@@ -66,7 +66,7 @@ print("Refit successfully!")
 # Saving Mutable Torch TensorRT Module
 # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-# Saving requires a C++-runtime compiled graph (see MutableTorchTensorRTModule.save).
+# Currently, saving is only enabled when "use_python_runtime" = False in settings
 torch_trt.MutableTorchTensorRTModule.save(mutable_module, "mutable_module.pkl")
 reload = torch_trt.MutableTorchTensorRTModule.load("mutable_module.pkl")
 
@@ -77,7 +77,7 @@ reload = torch_trt.MutableTorchTensorRTModule.load("mutable_module.pkl")
 
 with torch.no_grad():
     settings = {
-        "enabled_precisions": {torch.float16},
+        "use_python_runtime": True,
         "immutable_weights": False,
     }
 
@@ -209,7 +209,7 @@ end = torch.cuda.Event(enable_timing=True)
 example_inputs = (torch.randn((100, 3, 224, 224)).to("cuda"),)
 model = torch_trt.MutableTorchTensorRTModule(
     model,
-    enabled_precisions={torch.float},
+    use_python_runtime=True,
     min_block_size=1,
     immutable_weights=False,
     cache_built_engines=True,

@@ -34,7 +34,7 @@ class TestWeightStrippedEngine(TestCase):
         exp_program = torch.export.export(pyt_model, example_inputs)
 
         settings = {
-            "enabled_precisions": {torch.float},
+            "use_python_runtime": False,
             "min_block_size": 1,
             "immutable_weights": False,
             "strip_engine_weights": False,
@@ -83,7 +83,7 @@ class TestWeightStrippedEngine(TestCase):
         example_inputs = (torch.randn((100, 3, 224, 224)).to("cuda"),)
 
         settings = {
-            "enabled_precisions": {torch.float},
+            "use_python_runtime": False,
             "min_block_size": 1,
             "immutable_weights": False,
             "strip_engine_weights": True,
@@ -169,7 +169,7 @@ class TestWeightStrippedEngine(TestCase):
         trt_gm = torch_trt.dynamo.compile(
             exp_program,
             tuple(inputs),
-            enabled_precisions={torch.float},
+            use_python_runtime=True,
             min_block_size=1,
             immutable_weights=False,
             strip_engine_weights=True,
@@ -193,7 +193,7 @@ class TestWeightStrippedEngine(TestCase):
             pyt_model,
             backend="tensorrt",
             options={
-                "enabled_precisions": {torch.float},
+                "use_python_runtime": False,
                 "min_block_size": 1,
                 "immutable_weights": False,
                 "cache_built_engines": False,
@@ -239,7 +239,7 @@ class TestWeightStrippedEngine(TestCase):
         trt_gm = torch_trt.dynamo.compile(
             exp_program,
             tuple(example_inputs),
-            enabled_precisions={torch.float},
+            use_python_runtime=True,
             min_block_size=1,
             immutable_weights=False,
             strip_engine_weights=False,
@@ -316,7 +316,7 @@ class TestWeightStrippedEngine(TestCase):
             trt_gm = torch_trt.dynamo.compile(
                 exp_program,
                 tuple(inputs),
-                enabled_precisions={torch.float},
+                use_python_runtime=True,
                 min_block_size=1,
                 immutable_weights=False,
                 cache_built_engines=cache_built_engines,
@@ -399,7 +399,7 @@ class TestWeightStrippedEngine(TestCase):
                 pyt_model,
                 backend="tensorrt",
                 options={
-                    "enabled_precisions": {torch.float},
+                    "use_python_runtime": False,
                     "min_block_size": 1,
                     "immutable_weights": False,
                     "cache_built_engines": cache_built_engines,
@@ -475,7 +475,7 @@ class TestWeightStrippedEngine(TestCase):
                 pyt_model,
                 backend="tensorrt",
                 options={
-                    "enabled_precisions": {torch.float},
+                    "use_python_runtime": True,
                     "min_block_size": 1,
                     "immutable_weights": False,
                     "cache_built_engines": True,
@@ -517,6 +517,7 @@ class TestWeightStrippedEngine(TestCase):
             inputs=tuple(inputs),
             min_block_size=1,
             immutable_weights=False,
+            use_python_runtime=True,
             strip_engine_weights=True,
             refit_identical_engine_weights=False,
         )
@@ -552,9 +553,15 @@ class TestWeightStrippedEngine(TestCase):
         pyt_results = pyt_model(*inputs)
 
         for i in range(2):
+            if i == 0:
+                use_python_runtime = True
+            else:
+                use_python_runtime = False
+
             trt_gm = torch_trt.dynamo.compile(
                 exp_program,
                 tuple(inputs),
+                use_python_runtime=use_python_runtime,
                 min_block_size=1,
                 immutable_weights=False,
                 strip_engine_weights=True,
@@ -569,7 +576,7 @@ class TestWeightStrippedEngine(TestCase):
             cos_sim = cosine_similarity(pyt_results, refitted_output)
             assertions.assertTrue(
                 cos_sim > COSINE_THRESHOLD,
-                msg=f"iteration {i}: TorchTensorRTModule outputs don't match with the original model. Cosine sim score: {cos_sim} Threshold: {COSINE_THRESHOLD}",
+                msg=f"{'PythonTorchTensorRTModule' if use_python_runtime else 'TorchTensorRTModule'} outputs don't match with the original model. Cosine sim score: {cos_sim} Threshold: {COSINE_THRESHOLD}",
             )
 
     @unittest.skip("Waiting for implementation")
@@ -593,7 +600,7 @@ class TestWeightStrippedEngine(TestCase):
         trt_gm = torch_trt.dynamo.compile(
             exp_program,
             tuple(example_inputs),
-            enabled_precisions={torch.float},
+            use_python_runtime=True,
             min_block_size=1,
             immutable_weights=False,
             strip_engine_weights=True,
@@ -645,7 +652,7 @@ class TestWeightStrippedEngine(TestCase):
         trt_gm = torch_trt.dynamo.compile(
             exp_program,
             inputs,
-            enabled_precisions={torch.float},
+            use_python_runtime=True,
             min_block_size=1,
             immutable_weights=False,
             cache_built_engines=False,
@@ -685,7 +692,7 @@ class TestWeightStrippedEngine(TestCase):
             pyt_model,
             backend="tensorrt",
             options={
-                "enabled_precisions": {torch.float},
+                "use_python_runtime": False,
                 "min_block_size": 1,
                 "immutable_weights": False,
                 "cache_built_engines": False,

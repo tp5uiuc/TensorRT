@@ -1125,6 +1125,7 @@ class TestNcclOpsSingleRank(unittest.TestCase):
                 backend="torch_tensorrt",
                 dynamic=False,
                 options={
+                    "enabled_precisions": {torch.float32},
                     "use_python_runtime": True,
                     "min_block_size": 1,
                     "use_distributed_mode_trace": True,
@@ -1241,7 +1242,7 @@ class TestPythonRuntimePickle(unittest.TestCase):
             dist.destroy_process_group()
 
     def _compile_small_model(self) -> Any:
-        """Return a compiled PythonTorchTensorRTModule instance."""
+        """Return a compiled Python-runtime TorchTensorRTModule instance."""
         import torch_tensorrt
 
         class LinearModel(nn.Module):
@@ -1256,6 +1257,7 @@ class TestPythonRuntimePickle(unittest.TestCase):
                 backend="torch_tensorrt",
                 dynamic=False,
                 options={
+                    "enabled_precisions": {torch.float32},
                     "use_python_runtime": True,
                     "min_block_size": 1,
                 },
@@ -1269,13 +1271,11 @@ class TestPythonRuntimePickle(unittest.TestCase):
 
         trt_model = self._compile_small_model()
 
-        # Locate the underlying PythonTorchTensorRTModule
+        # Locate the underlying Python-runtime TorchTensorRTModule
         def find_module(obj: Any) -> Any:
-            from torch_tensorrt.dynamo.runtime._PythonTorchTensorRTModule import (
-                PythonTorchTensorRTModule,
-            )
+            from torch_tensorrt.dynamo.runtime import TorchTensorRTModule
 
-            if isinstance(obj, PythonTorchTensorRTModule):
+            if isinstance(obj, TorchTensorRTModule) and obj._use_python_runtime:
                 return obj
             for child in obj.children() if isinstance(obj, nn.Module) else []:
                 result = find_module(child)
@@ -1286,7 +1286,7 @@ class TestPythonRuntimePickle(unittest.TestCase):
         module = find_module(trt_model)
         if module is None:
             self.skipTest(
-                "Could not locate PythonTorchTensorRTModule in compiled model"
+                "Could not locate Python-runtime TorchTensorRTModule in compiled model"
             )
 
         state = module.__getstate__()
@@ -1303,11 +1303,9 @@ class TestPythonRuntimePickle(unittest.TestCase):
         trt_model = self._compile_small_model()
 
         def find_module(obj: Any) -> Any:
-            from torch_tensorrt.dynamo.runtime._PythonTorchTensorRTModule import (
-                PythonTorchTensorRTModule,
-            )
+            from torch_tensorrt.dynamo.runtime import TorchTensorRTModule
 
-            if isinstance(obj, PythonTorchTensorRTModule):
+            if isinstance(obj, TorchTensorRTModule) and obj._use_python_runtime:
                 return obj
             for child in obj.children() if isinstance(obj, nn.Module) else []:
                 result = find_module(child)
@@ -1318,7 +1316,7 @@ class TestPythonRuntimePickle(unittest.TestCase):
         module = find_module(trt_model)
         if module is None:
             self.skipTest(
-                "Could not locate PythonTorchTensorRTModule in compiled model"
+                "Could not locate Python-runtime TorchTensorRTModule in compiled model"
             )
 
         data = pickle.dumps(module)
@@ -1497,6 +1495,7 @@ def _multirank_distributed_mode_tp_model(
             backend="torch_tensorrt",
             dynamic=False,
             options={
+                "enabled_precisions": {torch.float32},
                 "use_python_runtime": True,
                 "min_block_size": 1,
                 "use_distributed_mode_trace": True,
@@ -1552,6 +1551,7 @@ def _multirank_distributed_mode_subgroup(
             backend="torch_tensorrt",
             dynamic=False,
             options={
+                "enabled_precisions": {torch.float32},
                 "use_python_runtime": True,
                 "min_block_size": 1,
                 "use_distributed_mode_trace": True,
@@ -1593,6 +1593,7 @@ def _multirank_cpp_runtime_bind_nccl(
         backend="torch_tensorrt",
         dynamic=False,
         options={
+            "enabled_precisions": {torch.float32},
             "use_python_runtime": False,  # C++ runtime
             "min_block_size": 1,
             "use_distributed_mode_trace": True,
@@ -1654,6 +1655,7 @@ def _multirank_distributed_mode_context_switch(
                 backend="torch_tensorrt",
                 dynamic=False,
                 options={
+                    "enabled_precisions": {torch.float32},
                     "use_python_runtime": True,
                     "min_block_size": 1,
                     "use_distributed_mode_trace": True,
@@ -1718,6 +1720,7 @@ def _multirank_pg_migration(rank: int, world_size: int, device: torch.device) ->
                 backend="torch_tensorrt",
                 dynamic=False,
                 options={
+                    "enabled_precisions": {torch.float32},
                     "use_python_runtime": use_python_runtime,
                     "min_block_size": 1,
                     "use_distributed_mode_trace": True,

@@ -495,11 +495,10 @@ def test_cosmos_true_div(ir):
         trt_model = torchtrt.dynamo.compile(
             ep,
             inputs=(hidden_states,),
-            enabled_precisions={torch.bfloat16},
-            use_explicit_typing=False,
             use_fp32_acc=False,
             device="cuda:0",
             disable_tf32=True,
+            use_python_runtime=True,
             min_block_size=1,
         )
         trt_output = trt_model(hidden_states)
@@ -634,6 +633,7 @@ def test_grouped_deconv3d_fallback(ir):
     compile_spec = {
         "inputs": [torchtrt.Input(input.shape, dtype=torch.float32)],
         "device": torchtrt.Device("cuda:0"),
+        "enabled_precisions": {torch.float32},
         "ir": ir,
         "pass_through_build_failures": True,
         "min_block_size": 1,

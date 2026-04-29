@@ -29,7 +29,7 @@ class TestDynamicAllocation(TestCase):
 
         settings = {
             "ir": "dynamo",
-            "enabled_precisions": {torch.float32},
+            "use_python_runtime": False,
             "immutable_weights": False,
             "lazy_engine_init": True,
             "dynamically_allocate_resources": True,

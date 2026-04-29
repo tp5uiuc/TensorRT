@@ -47,7 +47,7 @@ def compile_bert(iterations=3):
 
         start.record()
         compilation_kwargs = {
-            "enabled_precisions": {torch.float},
+            "use_python_runtime": False,
             "truncate_double": True,
             "min_block_size": 1,
             "immutable_weights": False,

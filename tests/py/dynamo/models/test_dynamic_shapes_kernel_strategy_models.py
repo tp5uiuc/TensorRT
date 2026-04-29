@@ -35,6 +35,7 @@ class TestDynamicShapesKernelStrategyModels(TestCase):
                     dtype=torch.float32,
                 )
             ],
+            enabled_precisions={torch.float32},
             use_python_runtime=True,
             min_block_size=1,
             dynamic_shapes_kernel_specialization_strategy=strategy,
@@ -100,6 +101,7 @@ class TestDynamicShapesKernelStrategyDynamic(TestCase):
                     dtype=torch.float32,
                 )
             ],
+            enabled_precisions={torch.float32},
             use_python_runtime=True,
             min_block_size=1,
             dynamic_shapes_kernel_specialization_strategy=strategy,

@@ -19,8 +19,14 @@ from torch.export.exported_program import (
     OutputSpec,
     TensorArgument,
 )
-from torch_tensorrt._features import ENABLED_FEATURES
-from torch_tensorrt.dynamo.runtime._TorchTensorRTModule import ENGINE_IDX, NAME_IDX
+from torch_tensorrt.dynamo.runtime._serialized_engine_layout import (
+    SERIALIZED_METADATA_IDX,
+)
+from torch_tensorrt.dynamo.runtime._TorchTensorRTModule import (
+    ENGINE_IDX,
+    NAME_IDX,
+    TorchTensorRTModule,
+)
 
 
 def export(
@@ -499,8 +505,14 @@ def inline_trt_modules(
                 setattr(gm, engine_name, trt_module.engine)
                 engine_node = gm.graph.get_attr(engine_name)
 
+                use_python = getattr(trt_module, "_use_python_runtime", False)
+                execute_op = (
+                    torch.ops.tensorrt.execute_engine_python.default
+                    if use_python
+                    else torch.ops.tensorrt.execute_engine.default
+                )
                 trt_node = gm.graph.call_function(
-                    torch.ops.tensorrt.execute_engine.default,
+                    execute_op,
                     (trt_module_node.args, engine_node),
                 )
                 engine_node.meta["val"] = CustomObjArgument(
@@ -550,17 +562,25 @@ def replace_execute_engine_no_op_node(
             packed_engine_info[ENGINE_IDX] = base64.b64decode(
                 engine_bytes.encode("utf-8")
             )
-            if ENABLED_FEATURES.torch_tensorrt_runtime:
-                trt_engine = torch.classes.tensorrt.Engine(tuple(packed_engine_info))
-            else:
+            metadata = TorchTensorRTModule.decode_metadata(
+                packed_engine_info[SERIALIZED_METADATA_IDX]
+            )
+            use_python_runtime = getattr(
+                metadata.get("settings"), "use_python_runtime", False
+            )
+            if use_python_runtime:
                 from torch_tensorrt.dynamo.runtime._TRTEngine import TRTEngine
 
                 trt_engine = TRTEngine(packed_engine_info)
+                execute_op = torch.ops.tensorrt.execute_engine_python.default
+            else:
+                trt_engine = torch.classes.tensorrt.Engine(tuple(packed_engine_info))
+                execute_op = torch.ops.tensorrt.execute_engine.default
             setattr(gm, engine_name, trt_engine)
             engine_node = gm.graph.get_attr(engine_name)
 
             trt_node = gm.graph.call_function(
-                torch.ops.tensorrt.execute_engine.default,
+                execute_op,
                 (no_op_placeholder_node.args[0], engine_node),
             )
             trt_node.meta["val"] = no_op_placeholder_node.meta["val"]

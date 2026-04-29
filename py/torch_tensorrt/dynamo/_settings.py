@@ -178,7 +178,7 @@ class CompilationSettings:
     cpu_memory_budget: Optional[int] = CPU_MEMORY_BUDGET
     dynamically_allocate_resources: bool = DYNAMICALLY_ALLOCATE_RESOURCES
     decompose_attention: bool = DECOMPOSE_ATTENTION
-    attn_bias_is_causal: bool = ATTN_BIAS_IS_CAUSAL
+    use_python_runtime: bool = False
 
     def __getstate__(self) -> dict[str, Any]:
         from torch_tensorrt.dynamo.conversion._ConverterRegistry import (
@@ -193,7 +193,7 @@ class CompilationSettings:
         return state
 
     def __setstate__(self, state: dict[str, Any]) -> None:
-        state.pop("use_python_runtime", None)
+        state.setdefault("use_python_runtime", False)
         self.__dict__.update(state)
 
 

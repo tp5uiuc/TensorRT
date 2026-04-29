@@ -810,8 +810,8 @@ def save(
                     f"Inferred dynamic_shapes from torch_tensorrt.Input objects with min/opt/max specifications: {dynamic_shapes}"
                 )
 
-        arg_tensors = tuple(get_torch_inputs(arg_inputs, default_device()))
-        kwarg_tensors = get_torch_inputs(kwarg_inputs, default_device())
+        arg_tensors = tuple(get_torch_inputs(arg_inputs, default_device()))  # type: ignore[arg-type]
+        kwarg_tensors = get_torch_inputs(kwarg_inputs, default_device())  # type: ignore[assignment]
 
     else:
         # Mixed case: some inputs are Tensors, some are Input objects
@@ -893,7 +893,6 @@ def save(
                     "Provided model is a torch.export.ExportedProgram, inputs or arg_inputs is not necessary during save, it uses the inputs or arg_inputs provided during export and compile"
                 )
             if output_format == "exported_program":
-                _normalize_engine_constants_to_python(module)
                 function_overload_with_kwargs(
                     torch.export.save,
                     module,
@@ -951,7 +950,6 @@ def save(
                     use_legacy_exporter=_use_legacy,
                 )
                 if output_format == "exported_program":
-                    _normalize_engine_constants_to_python(exp_program)
                     function_overload_with_kwargs(
                         torch.export.save,
                         exp_program,
@@ -1031,7 +1029,6 @@ def save(
                     )
 
                 if output_format == "exported_program":
-                    _normalize_engine_constants_to_python(exp_program)
                     function_overload_with_kwargs(
                         torch.export.save,
                         exp_program,
@@ -1054,37 +1051,6 @@ def save(
                     raise RuntimeError(
                         "Attempted to serialize an exported program with an unsupported format. Exported programs support exported_program and aot_inductor"
                     )
-
-
-def _normalize_engine_constants_to_python(exp_program: "ExportedProgram") -> None:
-    """Convert C++ ``torch.classes.tensorrt.Engine`` constants to Python ``TRTEngine``.
-
-    The C++ runtime stores engine constants as ``torch._C.ScriptObject``
-    (``torch.classes.tensorrt.Engine``).  Python ``TRTEngine`` is registered as
-    an opaque type so ``torch.export`` can serialise it with ``pickle``.  By
-    converting before save the artifact is portable across both runtimes.
-    """
-    import base64
-
-    from torch_tensorrt.dynamo.runtime._serialized_engine_layout import ENGINE_IDX
-    from torch_tensorrt.dynamo.runtime._TRTEngine import (
-        EngineSerializer,
-        TRTEngine,
-    )
-
-    for fqn, constant in list(exp_program.constants.items()):
-        if isinstance(constant, (torch._C.ScriptObject, TRTEngine)):
-
-            state = constant.__getstate__()
-            if len(state) == 2 and (
-                state[1] == "TRTEngine"
-                or state[1] == "__torch__.torch.classes.tensorrt.Engine"
-            ):
-                serialized_info = list(state[0])
-                serialized_info[ENGINE_IDX] = base64.b64decode(
-                    serialized_info[ENGINE_IDX]
-                )
-                exp_program.constants[fqn] = EngineSerializer(serialized_info)
 
 
 #

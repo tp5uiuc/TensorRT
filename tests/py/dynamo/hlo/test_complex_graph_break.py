@@ -28,19 +28,11 @@ import pytest
 import torch
 import torch.nn as nn
 import torch_tensorrt as torchtrt
+from torch_tensorrt.dynamo._settings import CompilationSettings
 from torch_tensorrt.dynamo.lowering.passes.complex_graph_rewrite import (
     complex_graph_detection,
 )
-from torch_tensorrt.dynamo._settings import CompilationSettings
 from torch_tensorrt.dynamo.utils import COSINE_THRESHOLD, cosine_similarity
-
-try:
-    from torch_tensorrt.dynamo.runtime import PythonTorchTensorRTModule
-
-    _PYTHON_RUNTIME_AVAILABLE = True
-except ImportError:  # pragma: no cover
-    _PYTHON_RUNTIME_AVAILABLE = False
-
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -63,11 +55,13 @@ def _cossim_real(py_out: torch.Tensor, trt_out: torch.Tensor, tag: str) -> None:
 
 
 def _count_trt_modules(mod: torch.nn.Module) -> int:
-    """Return the number of ``PythonTorchTensorRTModule`` submodules (-1 if unavailable)."""
-    if not _PYTHON_RUNTIME_AVAILABLE:
-        return -1
+    """Return the number of Python-runtime TorchTensorRTModule submodules."""
+    from torch_tensorrt.dynamo.runtime import TorchTensorRTModule
+
     return sum(
-        1 for _, m in mod.named_modules() if isinstance(m, PythonTorchTensorRTModule)
+        1
+        for _, m in mod.named_modules()
+        if isinstance(m, TorchTensorRTModule) and m._use_python_runtime
     )
 
 
@@ -205,7 +199,7 @@ def test_complex_partial_lowering_with_graph_break() -> None:
 
     Asserts:
       1. The compiled model is numerically correct (cosine sim > threshold).
-      2. At least one ``PythonTorchTensorRTModule`` submodule exists — confirming
+      2. At least one Python-runtime ``TorchTensorRTModule`` submodule exists — confirming
          the lowerable complex ops were compiled to TRT, not all relegated to
          PyTorch fallback.
       3. After lowering, cumsum receives a complex-dtype tensor (the

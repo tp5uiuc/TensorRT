@@ -26,6 +26,7 @@ def _compile_simple(**extra_kwargs):
     kwargs = {
         "ir": "dynamo",
         "inputs": inputs,
+        "enabled_precisions": {torch.float32},
         "use_python_runtime": True,
         "min_block_size": 1,
     }
@@ -36,13 +37,11 @@ def _compile_simple(**extra_kwargs):
 
 
 def _find_python_trt_module(compiled):
-    """Walk the compiled graph module to find PythonTorchTensorRTModule instances."""
-    from torch_tensorrt.dynamo.runtime._PythonTorchTensorRTModule import (
-        PythonTorchTensorRTModule,
-    )
+    """Walk the compiled graph module to find Python-runtime TorchTensorRTModule instances."""
+    from torch_tensorrt.dynamo.runtime import TorchTensorRTModule
 
     for name, mod in compiled.named_modules():
-        if isinstance(mod, PythonTorchTensorRTModule):
+        if isinstance(mod, TorchTensorRTModule) and mod._use_python_runtime:
             return mod
     return None
 
@@ -59,7 +58,7 @@ class TestDynamicShapesKernelStrategySetup(TestCase):
 
         compiled = _compile_simple()
         mod = _find_python_trt_module(compiled)
-        self.assertIsNotNone(mod, "No PythonTorchTensorRTModule found")
+        self.assertIsNotNone(mod, "No Python-runtime TorchTensorRTModule found")
         self.assertIsNotNone(mod.runtime_config, "runtime_config should be set for RTX")
         self.assertEqual(
             mod.runtime_config.dynamic_shapes_kernel_specialization_strategy,

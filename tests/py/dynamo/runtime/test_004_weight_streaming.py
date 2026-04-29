@@ -33,7 +33,19 @@ class SampleModel(torch.nn.Module):
 
 
 class TestWeightStreamingPython(TestCase):
-    def test_weight_streaming_default(self):
+    def setUp(self):
+        torchtrt.runtime.set_cudagraphs_mode(False)
+
+    def tearDown(self):
+        torchtrt.runtime.set_cudagraphs_mode(False)
+
+    @parameterized.expand(
+        [
+            ("python_runtime", True),
+            ("cpp_runtime", False),
+        ]
+    )
+    def test_weight_streaming_default(self, _, use_python_runtime):
         model = SampleModel().eval().cuda()
         input = [torch.randn(*INPUT_SIZE, dtype=torch.float32).cuda()]
         exp_program = torch.export.export(model, tuple(input))
@@ -43,7 +55,7 @@ class TestWeightStreamingPython(TestCase):
             min_block_size=1,
             cache_built_engines=False,
             reuse_cached_engines=False,
-            use_explicit_typing=True,
+            use_python_runtime=use_python_runtime,
             enable_weight_streaming=True,
         )
         # Checking if default weight streaming budget(automatic) is applied when compiler option was provided
@@ -77,7 +89,13 @@ class TestWeightStreamingPython(TestCase):
         )
         torch._dynamo.reset()
 
-    def test_weight_streaming_manual(self):
+    @parameterized.expand(
+        [
+            ("python_runtime", True),
+            ("cpp_runtime", False),
+        ]
+    )
+    def test_weight_streaming_manual(self, _, use_python_runtime):
         model = SampleModel().eval().cuda()
         input = [torch.randn(*INPUT_SIZE, dtype=torch.float32).cuda()]
         exp_program = torch.export.export(model, tuple(input))
@@ -87,7 +105,7 @@ class TestWeightStreamingPython(TestCase):
             min_block_size=1,
             cache_built_engines=False,
             reuse_cached_engines=False,
-            use_explicit_typing=True,
+            use_python_runtime=use_python_runtime,
             enable_weight_streaming=True,
         )
         # Weight streaming budget is applied manually.
@@ -130,11 +148,13 @@ class TestWeightStreamingPython(TestCase):
 
     @parameterized.expand(
         [
-            ("default", False),
-            ("multi_rt", True),
+            ("python_runtime", True, False),
+            ("python_runtime_multi_rt", True, True),
+            ("cpp_runtime", False, False),
+            ("cpp_runtime_multi_rt", False, True),
         ]
     )
-    def test_weight_streaming_invalid_usage(self, _, multi_rt):
+    def test_weight_streaming_invalid_usage(self, _, use_python_runtime, multi_rt):
         model = SampleModel().eval().cuda()
         input = [torch.randn(*INPUT_SIZE, dtype=torch.float32).cuda()]
         exp_program = torch.export.export(model, tuple(input))
@@ -147,7 +167,7 @@ class TestWeightStreamingPython(TestCase):
             torch_executed_ops=(
                 {"torch.ops.aten.convolution.default"} if multi_rt else {}
             ),
-            use_explicit_typing=True,
+            use_python_runtime=use_python_runtime,
             enable_weight_streaming=True,
         )
 
@@ -174,7 +194,13 @@ class TestWeightStreamingPython(TestCase):
 
         torch._dynamo.reset()
 
-    def test_weight_streaming_multi_rt(self):
+    @parameterized.expand(
+        [
+            ("python_runtime", True),
+            ("cpp_runtime", False),
+        ]
+    )
+    def test_weight_streaming_multi_rt(self, _, use_python_runtime):
         model = SampleModel().eval().cuda()
         input = [torch.randn(*INPUT_SIZE, dtype=torch.float32).cuda()]
         exp_program = torch.export.export(model, tuple(input))
@@ -186,7 +212,7 @@ class TestWeightStreamingPython(TestCase):
             cache_built_engines=False,
             reuse_cached_engines=False,
             torch_executed_ops={"torch.ops.aten.convolution.default"},
-            use_explicit_typing=True,
+            use_python_runtime=use_python_runtime,
             enable_weight_streaming=True,
         )
 
@@ -212,7 +238,13 @@ class TestWeightStreamingPython(TestCase):
 
         torch._dynamo.reset()
 
-    def test_weight_streaming_cudagraphs(self):
+    @parameterized.expand(
+        [
+            ("python_runtime", True),
+            ("cpp_runtime", False),
+        ]
+    )
+    def test_weight_streaming_cudagraphs(self, _, use_python_runtime):
         model = SampleModel().eval().cuda()
         input = [torch.randn(*INPUT_SIZE, dtype=torch.float32).cuda()]
         exp_program = torch.export.export(model, tuple(input))
@@ -224,7 +256,7 @@ class TestWeightStreamingPython(TestCase):
             cache_built_engines=False,
             reuse_cached_engines=False,
             torch_executed_ops={"torch.ops.aten.convolution.default"},
-            use_explicit_typing=True,
+            use_python_runtime=use_python_runtime,
             enable_weight_streaming=True,
         )
 
@@ -255,10 +287,16 @@ class TestWeightStreamingPython(TestCase):
         )
         torch._dynamo.reset()
 
+    @parameterized.expand(
+        [
+            ("python_runtime", True),
+            ("cpp_runtime", False),
+        ]
+    )
     @unittest.skipIf(
         is_orin(), "There is a bug on Orin platform, skip for now until bug is fixed"
     )
-    def test_runtime_state_change(self):
+    def test_runtime_state_change(self, _, use_python_runtime):
         class SampleModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -314,6 +352,7 @@ class TestWeightStreamingPython(TestCase):
             "reuse_cached_engines": False,
             "enable_weight_streaming": True,
             "torch_executed_ops": {"torch.ops.aten.mul.Tensor"},
+            "use_python_runtime": use_python_runtime,
         }
         exp_program = torchtrt.dynamo.trace(model, **compile_spec)
         optimized_model = torchtrt.dynamo.compile(
