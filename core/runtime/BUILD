@@ -88,6 +88,7 @@ cc_library(
         "RTDevice.cpp",
         "TRTEngine.cpp",
         "TRTEngineProfiler.cpp",
+        "TRTRuntimeConfig.cpp",
         "execute_engine.cpp",
         "runtime.cpp",
         "runtime_utils.cpp",
@@ -95,15 +96,23 @@ cc_library(
     hdrs = [
         "Platform.h",
         "RTDevice.h",
-        "TensorRTBindingNames.h",
         "TRTEngine.h",
         "TRTEngineProfiler.h",
+        "TRTRuntimeConfig.h",
+        "TensorRTBindingNames.h",
         "runtime.h",
     ],
     copts = if_torch_nccl(["-DUSE_C10D_NCCL"]),
     linkopts = [
         "-lstdc++fs",
     ],
+    local_defines = select({
+        # TensorRT-RTX builds: opt into feature-gated APIs that the runtime layer
+        # depends on (e.g. IExecutionContext::isStreamCapturable).
+        ":rtx_win": ["ENABLE_FEATURE_DISABLE_RUNTIME_ALLOCATION"],
+        ":rtx_x86_64": ["ENABLE_FEATURE_DISABLE_RUNTIME_ALLOCATION"],
+        "//conditions:default": [],
+    }),
     deps = [
         ":tensorrt_binding_names",
         "//core/plugins:torch_tensorrt_plugins",
@@ -135,9 +144,9 @@ cc_library(
     hdrs = [
         "Platform.h",
         "RTDevice.h",
-        "TensorRTBindingNames.h",
         "TRTEngine.h",
         "TRTEngineProfiler.h",
+        "TensorRTBindingNames.h",
         "runtime.h",
     ],
     deps = [
@@ -151,9 +160,10 @@ filegroup(
     srcs = [
         "Platform.h",
         "RTDevice.h",
-        "TensorRTBindingNames.h",
         "TRTEngine.h",
         "TRTEngineProfiler.h",
+        "TRTRuntimeConfig.h",
+        "TensorRTBindingNames.h",
         "runtime.h",
     ],
     visibility = ["//visibility:public"],

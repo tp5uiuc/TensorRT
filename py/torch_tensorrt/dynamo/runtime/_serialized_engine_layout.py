@@ -52,7 +52,18 @@ TARGET_PLATFORM_IDX = SerializedInfoIndex.TARGET_PLATFORM_IDX
 REQUIRES_OUTPUT_ALLOCATOR_IDX = SerializedInfoIndex.REQUIRES_OUTPUT_ALLOCATOR_IDX
 RESOURCE_ALLOCATION_STRATEGY_IDX = SerializedInfoIndex.RESOURCE_ALLOCATION_STRATEGY_IDX
 REQUIRES_NATIVE_MULTIDEVICE_IDX = SerializedInfoIndex.REQUIRES_NATIVE_MULTIDEVICE_IDX
+
+# TensorRT-RTX-only indices. The C++ side gates these on ``#ifdef TRT_MAJOR_RTX``,
+# so they only exist when the loaded runtime is the RTX build.
+RUNTIME_CACHE_PATH_IDX = -1
+DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX = -1
+CUDA_GRAPH_STRATEGY_IDX = -1
 SERIALIZATION_LEN = len(SerializedInfoIndex)
+if ENABLED_FEATURES.tensorrt_rtx:
+    RUNTIME_CACHE_PATH_IDX = len(SerializedInfoIndex)
+    DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX = len(SerializedInfoIndex) + 1
+    CUDA_GRAPH_STRATEGY_IDX = len(SerializedInfoIndex) + 2
+    SERIALIZATION_LEN = len(SerializedInfoIndex) + 3
 
 SERIALIZED_ENGINE_BINDING_DELIM = "%"
 SERIALIZED_RT_DEVICE_DELIM = "%"
@@ -78,12 +89,22 @@ _LAYOUT_CPP_CHECKS: tuple[_LayoutCheck, ...] = (
     ("SERIALIZED_RT_DEVICE_DELIM", "SERIALIZED_RT_DEVICE_DELIM", str),
 )
 
+# TensorRT-RTX-only checks. The C++ ops are only registered on RTX builds.
+_LAYOUT_CPP_CHECKS_RTX: tuple[_LayoutCheck, ...] = (
+    ("RUNTIME_CACHE_PATH_IDX", "RUNTIME_CACHE_PATH_IDX", int),
+    ("DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX", "DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX", int),
+    ("CUDA_GRAPH_STRATEGY_IDX", "CUDA_GRAPH_STRATEGY_IDX", int),
+)
+
 
 def _assert_serialized_layout_matches_cpp() -> None:
     """Fail fast if Python layout literals diverge from ``register_jit_hooks.cpp``."""
     if not ENABLED_FEATURES.torch_tensorrt_runtime:
         return
-    for op_name, global_name, normalizer in _LAYOUT_CPP_CHECKS:
+    checks = _LAYOUT_CPP_CHECKS
+    if ENABLED_FEATURES.tensorrt_rtx:
+        checks = checks + _LAYOUT_CPP_CHECKS_RTX
+    for op_name, global_name, normalizer in checks:
         expected = globals()[global_name]
         try:
             op = getattr(torch.ops.tensorrt, op_name)

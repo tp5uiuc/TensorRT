@@ -14,7 +14,9 @@ from torch_tensorrt.dynamo._settings import CompilationSettings
 from torch_tensorrt.dynamo.runtime._serialized_engine_layout import (
     ABI_TARGET_IDX,
     ABI_VERSION,
+    CUDA_GRAPH_STRATEGY_IDX,
     DEVICE_IDX,
+    DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX,
     ENGINE_IDX,
     HW_COMPATIBLE_IDX,
     INPUT_BINDING_NAMES_IDX,
@@ -23,6 +25,7 @@ from torch_tensorrt.dynamo.runtime._serialized_engine_layout import (
     REQUIRES_NATIVE_MULTIDEVICE_IDX,
     REQUIRES_OUTPUT_ALLOCATOR_IDX,
     RESOURCE_ALLOCATION_STRATEGY_IDX,
+    RUNTIME_CACHE_PATH_IDX,
     SERIALIZATION_LEN,
     SERIALIZED_METADATA_IDX,
     TARGET_PLATFORM_IDX,
@@ -39,6 +42,16 @@ SerializedTorchTensorRTModuleFmt = Tuple[
     List[str],
     List[str],
 ]
+
+_DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP: Dict[str, int] = {
+    "lazy": 0,
+    "eager": 1,
+    "none": 2,
+}
+_CUDA_GRAPH_STRATEGY_MAP: Dict[str, int] = {
+    "disabled": 0,
+    "whole_graph_capture": 1,
+}
 
 
 class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
@@ -132,6 +145,28 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
         self.execute_engine_op: Any = None
         self.requires_output_allocator = requires_output_allocator
         self.dynamically_allocate_resources = settings.dynamically_allocate_resources
+        # TensorRT-RTX-only runtime config mirror. The engine-info serialization slots
+        # only exist on RTX builds (see below), but we validate the strategy names on
+        # every build so typos are caught regardless of backend.
+        self.runtime_cache_path = settings.runtime_cache_path
+        self.dynamic_shapes_kernel_specialization_strategy = (
+            settings.dynamic_shapes_kernel_specialization_strategy
+        )
+        if (
+            self.dynamic_shapes_kernel_specialization_strategy
+            not in _DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP
+        ):
+            raise ValueError(
+                f"Invalid dynamic_shapes_kernel_specialization_strategy "
+                f"{self.dynamic_shapes_kernel_specialization_strategy!r}; expected one of "
+                f"{list(_DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP.keys())}"
+            )
+        self.cuda_graph_strategy = settings.cuda_graph_strategy
+        if self.cuda_graph_strategy not in _CUDA_GRAPH_STRATEGY_MAP:
+            raise ValueError(
+                f"Invalid cuda_graph_strategy {self.cuda_graph_strategy!r}; expected one of "
+                f"{list(_CUDA_GRAPH_STRATEGY_MAP.keys())}"
+            )
         self.symbolic_shape_expressions = symbolic_shape_expressions
         self.requires_native_multidevice = requires_native_multidevice
         self.target_platform = (
@@ -229,6 +264,18 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
             int(self.requires_native_multidevice)
         )
         # rank/world_size are runtime facts; queried from ProcessGroup at execution time
+        # Strategy names were validated at __init__ on every build; the index slots
+        # themselves only exist on RTX.
+        if ENABLED_FEATURES.tensorrt_rtx:
+            engine_info[RUNTIME_CACHE_PATH_IDX] = self.runtime_cache_path or ""
+            engine_info[DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX] = str(
+                _DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP[
+                    self.dynamic_shapes_kernel_specialization_strategy
+                ]
+            )
+            engine_info[CUDA_GRAPH_STRATEGY_IDX] = str(
+                _CUDA_GRAPH_STRATEGY_MAP[self.cuda_graph_strategy]
+            )
 
         return engine_info
 
@@ -332,8 +379,9 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
     def get_extra_state(self) -> SerializedTorchTensorRTModuleFmt:
         if self.engine:
             engine_info = self._pack_engine_info()
-            assert isinstance(engine_info[ENGINE_IDX], (bytes, bytearray))
-            engine_info[ENGINE_IDX] = base64.b64encode(engine_info[ENGINE_IDX])
+            engine_bytes = engine_info[ENGINE_IDX]
+            assert isinstance(engine_bytes, (bytes, bytearray))
+            engine_info[ENGINE_IDX] = base64.b64encode(engine_bytes)
             return (
                 self.name,
                 engine_info,
@@ -342,8 +390,9 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
             )
         elif self.serialized_engine:
             engine_info = self._pack_engine_info()
-            assert isinstance(engine_info[ENGINE_IDX], bytes)
-            engine_info[ENGINE_IDX] = base64.b64encode(engine_info[ENGINE_IDX])
+            engine_bytes = engine_info[ENGINE_IDX]
+            assert isinstance(engine_bytes, bytes)
+            engine_info[ENGINE_IDX] = base64.b64encode(engine_bytes)
             return (
                 self.name,
                 engine_info,
