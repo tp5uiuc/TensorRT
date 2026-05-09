@@ -264,8 +264,8 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
             int(self.requires_native_multidevice)
         )
         # rank/world_size are runtime facts; queried from ProcessGroup at execution time
-        # Strategy names were validated at __init__ on every build; the index slots
-        # themselves only exist on RTX.
+        # Strategy names are validated at __init__ time so typos fail fast on every
+        # build; the index slots themselves only exist on RTX.
         if ENABLED_FEATURES.tensorrt_rtx:
             engine_info[RUNTIME_CACHE_PATH_IDX] = self.runtime_cache_path or ""
             engine_info[DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX] = str(
