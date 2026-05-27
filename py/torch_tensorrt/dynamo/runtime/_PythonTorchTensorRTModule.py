@@ -591,8 +591,15 @@ class PythonTorchTensorRTModule(Module):  # type: ignore[misc]
         # Check 1: TRT-RTX stream capturability (runtime allocation, DDS, etc.)
         if not self.context.is_stream_capturable(stream.cuda_stream):
             return False
-        # Check 2: Lazy kernel specialization would invalidate captured graph
-        if self.settings.dynamic_shapes_kernel_specialization_strategy == "lazy":
+        # Check 2: Lazy kernel specialization can invalidate a captured graph,
+        # but only when the engine actually compiles shape-specialized kernels
+        # at runtime — i.e. when at least one input has a dynamic dim. A
+        # static-shape engine has no further specialization possible after
+        # build, so capture is safe even under the lazy strategy.
+        if (
+            self.settings.dynamic_shapes_kernel_specialization_strategy == "lazy"
+            and any(DYNAMIC_DIM in shape for shape in self.input_shapes)
+        ):
             return False
         return True
 
