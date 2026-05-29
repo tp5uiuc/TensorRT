@@ -37,6 +37,11 @@ class SerializedInfoIndex(IntEnum):
     REQUIRES_OUTPUT_ALLOCATOR_IDX = 9
     RESOURCE_ALLOCATION_STRATEGY_IDX = 10
     REQUIRES_NATIVE_MULTIDEVICE_IDX = 11
+    # HAS_RUNTIME_CFG_IDX gates the next three slots. When "0", their values are ignored.
+    HAS_RUNTIME_CFG_IDX = 12
+    RUNTIME_CACHE_PATH_IDX = 13
+    DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX = 14
+    CUDA_GRAPH_STRATEGY_IDX = 15
 
 
 # Module-level aliases for backward compatibility and concise access
@@ -52,18 +57,13 @@ TARGET_PLATFORM_IDX = SerializedInfoIndex.TARGET_PLATFORM_IDX
 REQUIRES_OUTPUT_ALLOCATOR_IDX = SerializedInfoIndex.REQUIRES_OUTPUT_ALLOCATOR_IDX
 RESOURCE_ALLOCATION_STRATEGY_IDX = SerializedInfoIndex.RESOURCE_ALLOCATION_STRATEGY_IDX
 REQUIRES_NATIVE_MULTIDEVICE_IDX = SerializedInfoIndex.REQUIRES_NATIVE_MULTIDEVICE_IDX
-
-# TensorRT-RTX-only indices. The C++ side gates these on ``#ifdef TRT_MAJOR_RTX``,
-# so they only exist when the loaded runtime is the RTX build.
-RUNTIME_CACHE_PATH_IDX = -1
-DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX = -1
-CUDA_GRAPH_STRATEGY_IDX = -1
+HAS_RUNTIME_CFG_IDX = SerializedInfoIndex.HAS_RUNTIME_CFG_IDX
+RUNTIME_CACHE_PATH_IDX = SerializedInfoIndex.RUNTIME_CACHE_PATH_IDX
+DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX = (
+    SerializedInfoIndex.DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX
+)
+CUDA_GRAPH_STRATEGY_IDX = SerializedInfoIndex.CUDA_GRAPH_STRATEGY_IDX
 SERIALIZATION_LEN = len(SerializedInfoIndex)
-if ENABLED_FEATURES.tensorrt_rtx:
-    RUNTIME_CACHE_PATH_IDX = len(SerializedInfoIndex)
-    DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX = len(SerializedInfoIndex) + 1
-    CUDA_GRAPH_STRATEGY_IDX = len(SerializedInfoIndex) + 2
-    SERIALIZATION_LEN = len(SerializedInfoIndex) + 3
 
 SERIALIZED_ENGINE_BINDING_DELIM = "%"
 SERIALIZED_RT_DEVICE_DELIM = "%"
@@ -84,16 +84,13 @@ _LAYOUT_CPP_CHECKS: tuple[_LayoutCheck, ...] = (
     ("REQUIRES_OUTPUT_ALLOCATOR_IDX", "REQUIRES_OUTPUT_ALLOCATOR_IDX", int),
     ("RESOURCE_ALLOCATION_STRATEGY_IDX", "RESOURCE_ALLOCATION_STRATEGY_IDX", int),
     ("REQUIRES_NATIVE_MULTIDEVICE_IDX", "REQUIRES_NATIVE_MULTIDEVICE_IDX", int),
-    ("SERIALIZATION_LEN", "SERIALIZATION_LEN", int),
-    ("SERIALIZED_ENGINE_BINDING_DELIM", "SERIALIZED_ENGINE_BINDING_DELIM", str),
-    ("SERIALIZED_RT_DEVICE_DELIM", "SERIALIZED_RT_DEVICE_DELIM", str),
-)
-
-# TensorRT-RTX-only checks. The C++ ops are only registered on RTX builds.
-_LAYOUT_CPP_CHECKS_RTX: tuple[_LayoutCheck, ...] = (
+    ("HAS_RUNTIME_CFG_IDX", "HAS_RUNTIME_CFG_IDX", int),
     ("RUNTIME_CACHE_PATH_IDX", "RUNTIME_CACHE_PATH_IDX", int),
     ("DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX", "DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX", int),
     ("CUDA_GRAPH_STRATEGY_IDX", "CUDA_GRAPH_STRATEGY_IDX", int),
+    ("SERIALIZATION_LEN", "SERIALIZATION_LEN", int),
+    ("SERIALIZED_ENGINE_BINDING_DELIM", "SERIALIZED_ENGINE_BINDING_DELIM", str),
+    ("SERIALIZED_RT_DEVICE_DELIM", "SERIALIZED_RT_DEVICE_DELIM", str),
 )
 
 
@@ -101,10 +98,7 @@ def _assert_serialized_layout_matches_cpp() -> None:
     """Fail fast if Python layout literals diverge from ``register_jit_hooks.cpp``."""
     if not ENABLED_FEATURES.torch_tensorrt_runtime:
         return
-    checks = _LAYOUT_CPP_CHECKS
-    if ENABLED_FEATURES.tensorrt_rtx:
-        checks = checks + _LAYOUT_CPP_CHECKS_RTX
-    for op_name, global_name, normalizer in checks:
+    for op_name, global_name, normalizer in _LAYOUT_CPP_CHECKS:
         expected = globals()[global_name]
         try:
             op = getattr(torch.ops.tensorrt, op_name)

@@ -506,14 +506,11 @@ FlattenedState TRTEngine::__obj_flatten__() {
       std::tuple("requires_output_allocator", serialized_info[REQUIRES_OUTPUT_ALLOCATOR_IDX]),
       std::tuple("target_platform", serialized_info[TARGET_PLATFORM_IDX]),
       std::tuple("resource_allocation_strategy", serialized_info[RESOURCE_ALLOCATION_STRATEGY_IDX]),
-      std::tuple("requires_native_multidevice", serialized_info[REQUIRES_NATIVE_MULTIDEVICE_IDX])
-#ifdef TRT_MAJOR_RTX
-          ,
+      std::tuple("requires_native_multidevice", serialized_info[REQUIRES_NATIVE_MULTIDEVICE_IDX]),
+      std::tuple("has_runtime_cfg", serialized_info[HAS_RUNTIME_CFG_IDX]),
       std::tuple("runtime_cache_path", serialized_info[RUNTIME_CACHE_PATH_IDX]),
       std::tuple("dynamic_shapes_kernel_strategy", serialized_info[DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX]),
-      std::tuple("cuda_graph_strategy", serialized_info[CUDA_GRAPH_STRATEGY_IDX])
-#endif
-  );
+      std::tuple("cuda_graph_strategy", serialized_info[CUDA_GRAPH_STRATEGY_IDX]));
 }
 
 std::vector<std::string> TRTEngine::serialize() {
@@ -541,12 +538,15 @@ std::vector<std::string> TRTEngine::serialize() {
   serialized_info[REQUIRES_NATIVE_MULTIDEVICE_IDX] = this->requires_native_multidevice ? "1" : "0";
   // rank/world_size are runtime facts (may differ at load time); not serialized.
 #ifdef TRT_MAJOR_RTX
+  serialized_info[HAS_RUNTIME_CFG_IDX] = "1";
+#else
+  serialized_info[HAS_RUNTIME_CFG_IDX] = "0";
+#endif
   serialized_info[RUNTIME_CACHE_PATH_IDX] = runtime_cfg.runtime_cache_path;
   serialized_info[DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX] = std::to_string(
       static_cast<std::underlying_type_t<DynamicShapesKernelStrategy>>(runtime_cfg.dynamic_shapes_kernel_strategy));
   serialized_info[CUDA_GRAPH_STRATEGY_IDX] =
       std::to_string(static_cast<std::underlying_type_t<CudaGraphStrategyOption>>(runtime_cfg.cuda_graph_strategy));
-#endif
 
   return serialized_info;
 }

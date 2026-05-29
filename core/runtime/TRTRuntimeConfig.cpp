@@ -234,14 +234,14 @@ std::string TRTRuntimeConfig::to_str() const {
   return os.str();
 }
 
-TRTRuntimeConfig make_runtime_config_from_serialized(TORCHTRT_UNUSED const std::vector<std::string>& info) {
+TRTRuntimeConfig make_runtime_config_from_serialized(const std::vector<std::string>& info) {
   TRTRuntimeConfig cfg;
-#ifdef TRT_MAJOR_RTX
-  cfg.runtime_cache_path = info[RUNTIME_CACHE_PATH_IDX];
-  cfg.dynamic_shapes_kernel_strategy =
-      to_dynamic_shapes_kernel_strategy(std::stoi(info[DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX]));
-  cfg.cuda_graph_strategy = to_cuda_graph_strategy_option(std::stoi(info[CUDA_GRAPH_STRATEGY_IDX]));
-#endif
+  if (info[HAS_RUNTIME_CFG_IDX] == "1") {
+    cfg.runtime_cache_path = info[RUNTIME_CACHE_PATH_IDX];
+    cfg.dynamic_shapes_kernel_strategy =
+        to_dynamic_shapes_kernel_strategy(std::stoi(info[DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX]));
+    cfg.cuda_graph_strategy = to_cuda_graph_strategy_option(std::stoi(info[CUDA_GRAPH_STRATEGY_IDX]));
+  }
   return cfg;
 }
 

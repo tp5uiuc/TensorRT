@@ -48,13 +48,11 @@ using FlattenedState = std::tuple<
     std::tuple<std::string, std::string>, // serialized metadata
     std::tuple<std::string, std::string>, // Platform
     std::tuple<std::string, std::string>, // Resource Allocation Strategy
-    std::tuple<std::string, std::string> // requires_native_multidevice
-#ifdef TRT_MAJOR_RTX
-    ,
+    std::tuple<std::string, std::string>, // requires_native_multidevice
+    std::tuple<std::string, std::string>, // has_runtime_cfg (gates next three)
     std::tuple<std::string, std::string>, // Runtime Cache Path (TRT-RTX)
     std::tuple<std::string, std::string>, // Dynamic Shapes Kernel Strategy (TRT-RTX)
     std::tuple<std::string, std::string> // CUDA Graph Strategy (TRT-RTX)
-#endif
     >;
 
 struct TorchTRTRuntimeStates {
