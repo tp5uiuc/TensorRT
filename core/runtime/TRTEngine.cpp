@@ -24,6 +24,23 @@ namespace torch_tensorrt {
 namespace core {
 namespace runtime {
 
+namespace {
+// TensorRT marks unspecified dimensions in dynamic-shape engines with -1.
+constexpr int32_t kDynamicDim = -1;
+
+// Returns true iff any of the listed input bindings (including shape tensors) has a
+// dynamic dimension.
+[[nodiscard]] bool engine_has_dynamic_inputs(
+    nvinfer1::ICudaEngine* cuda_engine,
+    std::vector<std::string> const& in_binding_names) {
+  TORCHTRT_CHECK(cuda_engine != nullptr, "engine_has_dynamic_inputs requires a live ICudaEngine");
+  return std::any_of(std::begin(in_binding_names), std::cend(in_binding_names), [cuda_engine](std::string const& name) {
+    auto const dims = cuda_engine->getTensorShape(name.c_str());
+    return std::any_of(dims.d, dims.d + dims.nbDims, [](int32_t d) { return d == kDynamicDim; });
+  });
+}
+} // namespace
+
 std::string slugify(std::string s) {
   std::replace(s.begin(), s.end(), '.', '_');
   return s;
@@ -71,26 +88,26 @@ void TRTEngine::record_active_input_tensor_stream_usage(const c10::cuda::CUDAStr
 }
 
 TRTEngine::TRTEngine(
-    std::string serialized_engine,
+    const std::string& serialized_engine,
     const RTDevice& cuda_device,
     const std::vector<std::string>& _in_binding_names,
     const std::vector<std::string>& _out_binding_names,
     const Platform& target_platform,
     bool hardware_compatible,
     bool requires_output_allocator,
-    std::string serialized_metadata,
+    const std::string& serialized_metadata,
     const ResourceAllocationStrategy resource_allocation_strategy,
     TRTRuntimeConfig runtime_cfg)
     : TRTEngine(
           "deserialized_trt",
-          std::move(serialized_engine),
+          serialized_engine,
           cuda_device,
           _in_binding_names,
           _out_binding_names,
           target_platform,
           hardware_compatible,
           requires_output_allocator,
-          std::move(serialized_metadata),
+          serialized_metadata,
           resource_allocation_strategy,
           std::move(runtime_cfg)) {}
 
@@ -116,15 +133,15 @@ TRTEngine::TRTEngine(std::vector<std::string> serialized_info)
 }
 
 TRTEngine::TRTEngine(
-    std::string mod_name,
-    std::string serialized_engine,
+    const std::string& mod_name,
+    const std::string& serialized_engine,
     const RTDevice& cuda_device,
     const std::vector<std::string>& _in_binding_names,
     const std::vector<std::string>& _out_binding_names,
     const Platform& target_platform,
     bool hardware_compatible,
     bool requires_output_allocator,
-    std::string serialized_metadata,
+    const std::string& serialized_metadata,
     const ResourceAllocationStrategy resource_allocation_strategy,
     TRTRuntimeConfig runtime_cfg) {
   this->runtime_cfg = std::move(runtime_cfg);
@@ -138,7 +155,7 @@ TRTEngine::TRTEngine(
   auto most_compatible_device = get_most_compatible_device(cuda_device, RTDevice(), hardware_compatible);
   TORCHTRT_CHECK(most_compatible_device, "No compatible device was found for instantiating TensorRT engine");
 
-  this->serialized_metadata = std::move(serialized_metadata);
+  this->serialized_metadata = serialized_metadata;
   this->requires_output_allocator = requires_output_allocator;
   device_info = most_compatible_device.value();
   multi_gpu_device_check();
@@ -148,7 +165,7 @@ TRTEngine::TRTEngine(
 
   rt = make_trt(nvinfer1::createInferRuntime(util::logging::get_logger()));
 
-  name = slugify(std::move(mod_name));
+  name = slugify(mod_name);
 
   cuda_engine = make_trt(rt->deserializeCudaEngine(serialized_engine.c_str(), serialized_engine.size()));
   TORCHTRT_CHECK((cuda_engine.get() != nullptr), "Unable to deserialize the TensorRT engine");
@@ -250,6 +267,8 @@ TRTEngine::TRTEngine(
     }
     num_io = std::make_pair(inputs_size, outputs);
   }
+
+  runtime_cfg.has_dynamic_inputs = engine_has_dynamic_inputs(cuda_engine.get(), in_binding_names);
 
 #ifndef NDEBUG
   this->enable_profiling();

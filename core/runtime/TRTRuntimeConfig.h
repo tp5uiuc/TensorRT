@@ -41,6 +41,8 @@ struct TRTRuntimeConfig {
   // owning engine's lifetime.
   bool rtx_native_cudagraphs_disabled = false;
 
+  bool has_dynamic_inputs = true;
+
   // Live resources. The IRuntimeConfig is lazy-constructed on first `ensure_initialized`
   // and is unavailable on TensorRT versions older than 10.11 (e.g. Jetpack).
 #ifdef TRT_HAS_IRUNTIME_CONFIG

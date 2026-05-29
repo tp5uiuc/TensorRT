@@ -199,10 +199,13 @@ bool TRTRuntimeConfig::is_monolithic_capturable(
     TORCHTRT_UNUSED cudaStream_t stream) const {
 #ifdef TRT_MAJOR_RTX
   TORCHTRT_ASSERT(exec_ctx != nullptr, "is_monolithic_capturable requires a live IExecutionContext");
-  // "lazy" kernel specialization swaps specialized kernels in mid-run, which invalidates
-  // captured graphs. Other strategies (eager/none) are safe when the context reports the
-  // stream capturable.
-  return exec_ctx->isStreamCapturable(stream) && dynamic_shapes_kernel_strategy != DynamicShapesKernelStrategy::kLazy;
+  if (!exec_ctx->isStreamCapturable(stream)) {
+    return false;
+  }
+  // "lazy" kernel specialization only swaps specialized kernels mid-run when an input
+  // has a dynamic dimension; for static-shape engines the kernels are fixed at setup and
+  // the captured graph stays valid. Mirrors the Python `_is_monolithic_capturable` check.
+  return !(dynamic_shapes_kernel_strategy == DynamicShapesKernelStrategy::kLazy && has_dynamic_inputs);
 #else
   return true;
 #endif

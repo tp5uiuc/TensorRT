@@ -150,14 +150,14 @@ struct TRTEngine : torch::CustomClassHolder {
 
   ~TRTEngine();
   TRTEngine(
-      std::string serialized_engine,
+      const std::string& serialized_engine,
       const RTDevice& cuda_device,
       const std::vector<std::string>& in_binding_names,
       const std::vector<std::string>& out_binding_names,
       const Platform& target_platform = get_current_platform(),
       bool hardware_compatible = false,
       bool requires_output_allocator = false,
-      std::string serialized_metadata = "",
+      const std::string& serialized_metadata = "",
       const TRTEngine::ResourceAllocationStrategy resource_allocation_strategy =
           TRTEngine::ResourceAllocationStrategy::kStatic,
       TRTRuntimeConfig runtime_cfg = TRTRuntimeConfig{});
@@ -165,15 +165,15 @@ struct TRTEngine : torch::CustomClassHolder {
   TRTEngine(std::vector<std::string> serialized_info);
 
   TRTEngine(
-      std::string mod_name,
-      std::string serialized_engine,
+      const std::string& mod_name,
+      const std::string& serialized_engine,
       const RTDevice& cuda_device,
       const std::vector<std::string>& in_binding_names,
       const std::vector<std::string>& out_binding_names,
       const Platform& target_platform = get_current_platform(),
       bool hardware_compatible = false,
       bool requires_output_allocator = false,
-      std::string serialized_metadata = "",
+      const std::string& serialized_metadata = "",
       const TRTEngine::ResourceAllocationStrategy resource_allocation_strategy =
           TRTEngine::ResourceAllocationStrategy::kStatic,
       TRTRuntimeConfig runtime_cfg = TRTRuntimeConfig{});
