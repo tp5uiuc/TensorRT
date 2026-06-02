@@ -126,6 +126,11 @@ TRTEngine::TRTEngine(std::vector<std::string> serialized_info)
                ? ResourceAllocationStrategy::kDynamic
                : ResourceAllocationStrategy::kStatic),
           make_runtime_config_from_serialized(serialized_info)) {
+  // Single visible marker that this engine was instantiated through the C++ runtime
+  // entry point (i.e. torch.classes.tensorrt.Engine), distinguishing it from the Python
+  // TRTEngine path. Tests look for this string in captured stderr to verify the
+  // expected backend was exercised.
+  LOG_INFO("[torch-TensorRT C++ runtime] TRTEngine constructed from serialized info");
   this->requires_native_multidevice = std::stoi(serialized_info[REQUIRES_NATIVE_MULTIDEVICE_IDX]);
   if (this->requires_native_multidevice) {
     LOG_INFO("Loaded distributed TRT engine (contains NCCL collectives); NCCL comm will be bound on first execution");

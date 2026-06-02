@@ -2,14 +2,57 @@ import unittest
 
 import torch
 import torch_tensorrt as torchtrt
+from parameterized import parameterized
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch_tensorrt._features import ENABLED_FEATURES
 from torch_tensorrt.dynamo._settings import CompilationSettings
+
+_STRATEGIES = [("lazy",), ("eager",), ("none",)]
 
 
 class SimpleModel(torch.nn.Module):
     def forward(self, x):
         return torch.relu(x) + 1.0
+
+
+class DynamicConvModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv1 = torch.nn.Conv2d(3, 16, 3, padding=1)
+        self.conv2 = torch.nn.Conv2d(16, 8, 3, padding=1)
+
+    def forward(self, x):
+        return torch.relu(self.conv2(torch.relu(self.conv1(x))))
+
+
+_RUNTIMES = [("python", True), ("cpp", False)]
+
+
+def _skip_if_cpp_unavailable(testcase, use_python_runtime):
+    if not use_python_runtime and not ENABLED_FEATURES.torch_tensorrt_runtime:
+        testcase.skipTest("C++ runtime is not available")
+
+
+def _compile_dynamic_conv(strategy, *, use_python_runtime):
+    """Compile DynamicConvModel through the selected runtime with the given strategy."""
+    model = DynamicConvModel().eval().cuda()
+    inp = torchtrt.Input(
+        min_shape=(1, 3, 16, 16),
+        opt_shape=(2, 3, 16, 16),
+        max_shape=(4, 3, 16, 16),
+        dtype=torch.float32,
+    )
+    compiled = torchtrt.compile(
+        model,
+        ir="dynamo",
+        inputs=[inp],
+        enabled_precisions={torch.float32},
+        use_python_runtime=use_python_runtime,
+        min_block_size=1,
+        dynamic_shapes_kernel_specialization_strategy=strategy,
+    )
+    torch._dynamo.reset()
+    return compiled
 
 
 def _compile_simple(**extra_kwargs):
@@ -145,6 +188,67 @@ class TestDynamicShapesKernelStrategyNonRTX(TestCase):
         # Inference should still work
         output = compiled(torch.randn(2, 3).cuda())
         self.assertEqual(output.shape, (2, 3))
+
+
+_STRATEGY_RUNTIME_MATRIX = [
+    (strategy, runtime_name, use_python_runtime)
+    for (strategy,) in _STRATEGIES
+    for (runtime_name, use_python_runtime) in _RUNTIMES
+]
+
+
+@unittest.skipIf(
+    not ENABLED_FEATURES.tensorrt_rtx,
+    "Dynamic shapes kernel strategy is a TensorRT-RTX feature",
+)
+class TestDynamicShapesKernelStrategyInference(TestCase):
+    """End-to-end: compile + infer with each strategy on both runtime paths."""
+
+    @parameterized.expand(_STRATEGY_RUNTIME_MATRIX)
+    def test_strategy_inference(self, strategy, _runtime_name, use_python_runtime):
+        _skip_if_cpp_unavailable(self, use_python_runtime)
+        compiled = _compile_dynamic_conv(
+            strategy, use_python_runtime=use_python_runtime
+        )
+        x = torch.randn(2, 3, 16, 16, device="cuda")
+        y = compiled(x)
+        self.assertEqual(tuple(y.shape), (2, 8, 16, 16))
+        self.assertTrue(torch.isfinite(y).all().item())
+
+    @parameterized.expand(_RUNTIMES)
+    def test_dynamic_shape_with_eager(self, _name, use_python_runtime):
+        """Exercise shape changes under eager kernel specialization."""
+        _skip_if_cpp_unavailable(self, use_python_runtime)
+        compiled = _compile_dynamic_conv("eager", use_python_runtime=use_python_runtime)
+        for batch in (1, 2, 3, 4):
+            x = torch.randn(batch, 3, 16, 16, device="cuda")
+            y = compiled(x)
+            self.assertEqual(tuple(y.shape), (batch, 8, 16, 16))
+
+
+class TestDynamicShapesKernelStrategyInvalidValue(TestCase):
+    """Invalid strategy names are rejected at TorchTensorRTModule.__init__ on any backend."""
+
+    @parameterized.expand(_RUNTIMES)
+    def test_invalid_strategy_raises(self, _name, use_python_runtime):
+        _skip_if_cpp_unavailable(self, use_python_runtime)
+        model = DynamicConvModel().eval().cuda()
+        inp = torchtrt.Input(
+            min_shape=(1, 3, 16, 16),
+            opt_shape=(2, 3, 16, 16),
+            max_shape=(4, 3, 16, 16),
+            dtype=torch.float32,
+        )
+        with self.assertRaises((ValueError, RuntimeError)):
+            torchtrt.compile(
+                model,
+                ir="dynamo",
+                inputs=[inp],
+                enabled_precisions={torch.float32},
+                use_python_runtime=use_python_runtime,
+                min_block_size=1,
+                dynamic_shapes_kernel_specialization_strategy="not_a_real_strategy",
+            )
 
 
 if __name__ == "__main__":

@@ -1,5 +1,4 @@
 import gc
-import logging
 import os
 import shutil
 import tempfile
@@ -7,10 +6,11 @@ import unittest
 
 import torch
 import torch_tensorrt as torchtrt
+from parameterized import parameterized
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch_tensorrt._features import ENABLED_FEATURES
 from torch_tensorrt.dynamo._defaults import RUNTIME_CACHE_PATH, TIMING_CACHE_PATH
-from torch_tensorrt.dynamo._settings import CompilationSettings
+from torch_tensorrt.dynamo.utils import COSINE_THRESHOLD, cosine_similarity
 
 
 class SimpleModel(torch.nn.Module):
@@ -18,39 +18,58 @@ class SimpleModel(torch.nn.Module):
         return torch.relu(x) + 1.0
 
 
-class TwoLayerModel(torch.nn.Module):
+class ConvModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.linear = torch.nn.Linear(8, 8)
+        self.conv = torch.nn.Conv2d(3, 8, 3, padding=1)
 
     def forward(self, x):
-        return torch.relu(self.linear(x))
+        return torch.relu(self.conv(x))
 
 
-def _compile_simple(runtime_cache_path=None):
-    """Helper: compile SimpleModel with Python runtime, return (compiled_module, inputs)."""
-    model = SimpleModel().eval().cuda()
-    inputs = [torch.randn(2, 3).cuda()]
+def _fresh_conv_model_and_inputs(seed=0):
+    """Deterministic ConvModel + input pair for end-to-end cache tests on either runtime."""
+    torch.manual_seed(seed)
+    return ConvModel().eval().cuda(), [torch.randn(2, 3, 16, 16).cuda()]
+
+
+def _compile(model, inputs, *, use_python_runtime, runtime_cache_path=None):
+    """Compile ``model`` through either runtime. Returns the compiled module."""
     kwargs = {
         "ir": "dynamo",
         "inputs": inputs,
-        "use_python_runtime": True,
+        "use_python_runtime": use_python_runtime,
         "min_block_size": 1,
     }
     if runtime_cache_path is not None:
         kwargs["runtime_cache_path"] = runtime_cache_path
     compiled = torchtrt.compile(model, **kwargs)
     torch._dynamo.reset()
-    return compiled, inputs
+    return compiled
+
+
+def _compile_simple(runtime_cache_path=None):
+    """Compile SimpleModel on the Python runtime (used by introspection setup tests)."""
+    model = SimpleModel().eval().cuda()
+    inputs = [torch.randn(2, 3).cuda()]
+    return (
+        _compile(
+            model,
+            inputs,
+            use_python_runtime=True,
+            runtime_cache_path=runtime_cache_path,
+        ),
+        inputs,
+    )
 
 
 def _find_python_trt_engine(compiled):
-    """Walk the compiled graph module and return the Python ``TRTEngine`` instance.
+    """Return the Python ``TRTEngine`` instance from a compiled module, if any.
 
     The C++ and Python runtimes are now both driven through ``TorchTensorRTModule``
-    (``use_python_runtime`` selects which backend is constructed). For tests that
-    target the Python runtime specifically we look for the wrapping module and
-    return its ``.engine`` attribute when it's a Python ``TRTEngine``.
+    (``use_python_runtime`` selects which backend is constructed). Tests that target
+    Python-runtime introspection use this helper; C++-runtime tests rely on
+    externally observable behavior (cache file on disk, inference correctness).
     """
     from torch_tensorrt.dynamo.runtime._TorchTensorRTModule import TorchTensorRTModule
     from torch_tensorrt.dynamo.runtime._TRTEngine import TRTEngine
@@ -59,6 +78,16 @@ def _find_python_trt_engine(compiled):
         if isinstance(mod, TorchTensorRTModule) and isinstance(mod.engine, TRTEngine):
             return mod.engine
     return None
+
+
+# Parameterize end-to-end cache persistence tests over both runtime paths. The C++
+# variant is skipped inside the test body when the C++ runtime is not available.
+_RUNTIMES = [("python", True), ("cpp", False)]
+
+
+def _skip_if_cpp_unavailable(testcase, use_python_runtime):
+    if not use_python_runtime and not ENABLED_FEATURES.torch_tensorrt_runtime:
+        testcase.skipTest("C++ runtime is not available")
 
 
 @unittest.skipIf(
@@ -108,7 +137,7 @@ class TestRuntimeCacheSetup(TestCase):
     "Runtime cache is only available with TensorRT-RTX",
 )
 class TestRuntimeCachePersistence(TestCase):
-    """Tests that runtime cache is correctly saved to and loaded from disk."""
+    """Load-on-setup / save-on-destructor contract, exercised on both runtimes."""
 
     def setUp(self):
         self.cache_dir = tempfile.mkdtemp()
@@ -117,9 +146,16 @@ class TestRuntimeCachePersistence(TestCase):
     def tearDown(self):
         shutil.rmtree(self.cache_dir, ignore_errors=True)
 
-    def test_cache_saved_on_del(self):
-        compiled, inputs = _compile_simple(runtime_cache_path=self.cache_path)
-        # Run inference to populate the cache
+    @parameterized.expand(_RUNTIMES)
+    def test_cache_saved_on_del(self, _name, use_python_runtime):
+        _skip_if_cpp_unavailable(self, use_python_runtime)
+        model, inputs = _fresh_conv_model_and_inputs()
+        compiled = _compile(
+            model,
+            inputs,
+            use_python_runtime=use_python_runtime,
+            runtime_cache_path=self.cache_path,
+        )
         _ = compiled(*[inp.clone() for inp in inputs])
         self.assertFalse(
             os.path.isfile(self.cache_path),
@@ -132,8 +168,16 @@ class TestRuntimeCachePersistence(TestCase):
             "Cache file should be created after module cleanup",
         )
 
-    def test_cache_file_nonempty(self):
-        compiled, inputs = _compile_simple(runtime_cache_path=self.cache_path)
+    @parameterized.expand(_RUNTIMES)
+    def test_cache_file_nonempty(self, _name, use_python_runtime):
+        _skip_if_cpp_unavailable(self, use_python_runtime)
+        model, inputs = _fresh_conv_model_and_inputs()
+        compiled = _compile(
+            model,
+            inputs,
+            use_python_runtime=use_python_runtime,
+            runtime_cache_path=self.cache_path,
+        )
         _ = compiled(*[inp.clone() for inp in inputs])
         del compiled
         gc.collect()
@@ -143,30 +187,54 @@ class TestRuntimeCachePersistence(TestCase):
             "Cache file should have nonzero size",
         )
 
-    def test_cache_roundtrip(self):
-        """Compile, infer, save. Then compile again with same cache path and verify correctness."""
-        model = SimpleModel().eval().cuda()
-        inputs = [torch.randn(2, 3).cuda()]
-        ref_output = model(*inputs)
+    @parameterized.expand(_RUNTIMES)
+    def test_cache_roundtrip(self, _name, use_python_runtime):
+        """Populate + save, then recompile and confirm correctness against eager output."""
+        _skip_if_cpp_unavailable(self, use_python_runtime)
+        model, inputs = _fresh_conv_model_and_inputs()
+        with torch.no_grad():
+            ref_output = model(*inputs)
 
-        # First compilation — populates and saves cache
-        compiled1, _ = _compile_simple(runtime_cache_path=self.cache_path)
-        _ = compiled1(*[inp.clone() for inp in inputs])
+        compiled1 = _compile(
+            model,
+            inputs,
+            use_python_runtime=use_python_runtime,
+            runtime_cache_path=self.cache_path,
+        )
+        out1 = compiled1(*[inp.clone() for inp in inputs])
+        self.assertGreater(
+            cosine_similarity(ref_output, out1),
+            COSINE_THRESHOLD,
+            "First compiled output should match eager",
+        )
         del compiled1
         gc.collect()
         self.assertTrue(os.path.isfile(self.cache_path))
 
-        # Second compilation — should load cached data
-        compiled2, _ = _compile_simple(runtime_cache_path=self.cache_path)
-        output = compiled2(*[inp.clone() for inp in inputs])
-        max_diff = float(torch.max(torch.abs(ref_output - output)))
-        self.assertAlmostEqual(
-            max_diff, 0, places=3, msg="Output mismatch after cache roundtrip"
+        compiled2 = _compile(
+            model,
+            inputs,
+            use_python_runtime=use_python_runtime,
+            runtime_cache_path=self.cache_path,
+        )
+        out2 = compiled2(*[inp.clone() for inp in inputs])
+        self.assertGreater(
+            cosine_similarity(ref_output, out2),
+            COSINE_THRESHOLD,
+            "Second compiled output (warm cache) should still match eager",
         )
 
-    def test_save_creates_directory(self):
+    @parameterized.expand(_RUNTIMES)
+    def test_save_creates_directory(self, _name, use_python_runtime):
+        _skip_if_cpp_unavailable(self, use_python_runtime)
         nested_path = os.path.join(self.cache_dir, "a", "b", "c", "runtime_cache.bin")
-        compiled, inputs = _compile_simple(runtime_cache_path=nested_path)
+        model, inputs = _fresh_conv_model_and_inputs()
+        compiled = _compile(
+            model,
+            inputs,
+            use_python_runtime=use_python_runtime,
+            runtime_cache_path=nested_path,
+        )
         _ = compiled(*[inp.clone() for inp in inputs])
         del compiled
         gc.collect()
@@ -289,6 +357,40 @@ class TestNonRTXUnchanged(TestCase):
         self.assertTrue(
             os.path.isfile(TIMING_CACHE_PATH),
             "Timing cache should still be created for standard TRT",
+        )
+
+
+@unittest.skipIf(
+    not ENABLED_FEATURES.torch_tensorrt_runtime,
+    "C++ runtime is not available",
+)
+class TestSerializationIndices(TestCase):
+    """The HAS_RUNTIME_CFG flag + TRTRuntimeConfig slots are present on both backends."""
+
+    def test_indices_match_python_layout(self):
+        from torch_tensorrt.dynamo.runtime._serialized_engine_layout import (
+            CUDA_GRAPH_STRATEGY_IDX,
+            DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX,
+            HAS_RUNTIME_CFG_IDX,
+            RUNTIME_CACHE_PATH_IDX,
+            SERIALIZATION_LEN,
+        )
+
+        self.assertEqual(int(torch.ops.tensorrt.SERIALIZATION_LEN()), SERIALIZATION_LEN)
+        self.assertEqual(
+            int(torch.ops.tensorrt.HAS_RUNTIME_CFG_IDX()), int(HAS_RUNTIME_CFG_IDX)
+        )
+        self.assertEqual(
+            int(torch.ops.tensorrt.RUNTIME_CACHE_PATH_IDX()),
+            int(RUNTIME_CACHE_PATH_IDX),
+        )
+        self.assertEqual(
+            int(torch.ops.tensorrt.DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX()),
+            int(DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX),
+        )
+        self.assertEqual(
+            int(torch.ops.tensorrt.CUDA_GRAPH_STRATEGY_IDX()),
+            int(CUDA_GRAPH_STRATEGY_IDX),
         )
 
 

@@ -2,9 +2,43 @@ import unittest
 
 import torch
 import torch_tensorrt as torchtrt
+from parameterized import parameterized
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch_tensorrt._features import ENABLED_FEATURES
 from torch_tensorrt.dynamo._settings import CompilationSettings
+
+_RUNTIMES = [("python", True), ("cpp", False)]
+
+
+def _skip_if_cpp_unavailable(testcase, use_python_runtime):
+    if not use_python_runtime and not ENABLED_FEATURES.torch_tensorrt_runtime:
+        testcase.skipTest("C++ runtime is not available")
+
+
+class CudaGraphConvModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(3, 8, 3, padding=1)
+
+    def forward(self, x):
+        return torch.relu(self.conv(x))
+
+
+def _compile_conv(strategy, *, use_python_runtime):
+    """Compile CudaGraphConvModel through the selected runtime with the given strategy."""
+    model = CudaGraphConvModel().eval().cuda()
+    inputs = [torch.randn(2, 3, 16, 16).cuda()]
+    compiled = torchtrt.compile(
+        model,
+        ir="dynamo",
+        inputs=inputs,
+        enabled_precisions={torch.float32},
+        use_python_runtime=use_python_runtime,
+        min_block_size=1,
+        cuda_graph_strategy=strategy,
+    )
+    torch._dynamo.reset()
+    return compiled, inputs
 
 
 class SimpleModel(torch.nn.Module):
@@ -351,6 +385,81 @@ class TestCudaGraphStrategyNonRTX(TestCase):
             self.assertFalse(engine._rtx_native_cudagraphs)
         output = compiled(torch.randn(2, 3).cuda())
         self.assertEqual(output.shape, (2, 3))
+
+
+_STRATEGY_RUNTIME_MATRIX = [
+    (strategy, runtime_name, use_python_runtime)
+    for strategy in ("disabled", "whole_graph_capture")
+    for (runtime_name, use_python_runtime) in _RUNTIMES
+]
+
+
+@unittest.skipIf(
+    not ENABLED_FEATURES.tensorrt_rtx,
+    "CUDA graph strategy is a TensorRT-RTX feature",
+)
+class TestCudaGraphStrategyInference(TestCase):
+    """End-to-end: compile + infer with each strategy on both runtime paths."""
+
+    def tearDown(self):
+        torchtrt.runtime.set_cudagraphs_mode(False)
+
+    @parameterized.expand(_STRATEGY_RUNTIME_MATRIX)
+    def test_strategy_inference(self, strategy, _runtime_name, use_python_runtime):
+        _skip_if_cpp_unavailable(self, use_python_runtime)
+        compiled, inputs = _compile_conv(
+            strategy, use_python_runtime=use_python_runtime
+        )
+        y = compiled(*[inp.clone() for inp in inputs])
+        self.assertEqual(tuple(y.shape), (2, 8, 16, 16))
+        self.assertTrue(torch.isfinite(y).all().item())
+
+    @parameterized.expand(_RUNTIMES)
+    def test_whole_graph_capture_with_subgraph_cudagraphs(
+        self, _name, use_python_runtime
+    ):
+        """Subgraph cudagraph mode + RTX strategy: RTX-native should take over without errors."""
+        _skip_if_cpp_unavailable(self, use_python_runtime)
+        compiled, inputs = _compile_conv(
+            "whole_graph_capture", use_python_runtime=use_python_runtime
+        )
+        torchtrt.runtime.set_cudagraphs_mode(True)
+        y = compiled(*[inp.clone() for inp in inputs])
+        self.assertEqual(tuple(y.shape), (2, 8, 16, 16))
+        self.assertTrue(torch.isfinite(y).all().item())
+
+    @parameterized.expand(_RUNTIMES)
+    def test_repeated_inference(self, _name, use_python_runtime):
+        """Repeated inference exercises the RTX-native capture/replay path."""
+        _skip_if_cpp_unavailable(self, use_python_runtime)
+        compiled, inputs = _compile_conv(
+            "whole_graph_capture", use_python_runtime=use_python_runtime
+        )
+        ref = compiled(*[inp.clone() for inp in inputs])
+        for _ in range(4):
+            out = compiled(*[inp.clone() for inp in inputs])
+            self.assertEqual(out.shape, ref.shape)
+            self.assertTrue(torch.isfinite(out).all().item())
+
+
+class TestCudaGraphStrategyInvalidValue(TestCase):
+    """Invalid strategy names are rejected at TorchTensorRTModule.__init__ on any backend."""
+
+    @parameterized.expand(_RUNTIMES)
+    def test_invalid_strategy_raises(self, _name, use_python_runtime):
+        _skip_if_cpp_unavailable(self, use_python_runtime)
+        model = CudaGraphConvModel().eval().cuda()
+        inputs = [torch.randn(2, 3, 16, 16).cuda()]
+        with self.assertRaises((ValueError, RuntimeError)):
+            torchtrt.compile(
+                model,
+                ir="dynamo",
+                inputs=inputs,
+                enabled_precisions={torch.float32},
+                use_python_runtime=use_python_runtime,
+                min_block_size=1,
+                cuda_graph_strategy="not_a_real_strategy",
+            )
 
 
 if __name__ == "__main__":
