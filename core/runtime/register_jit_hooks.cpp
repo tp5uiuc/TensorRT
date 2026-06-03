@@ -1,6 +1,7 @@
 #include <codecvt>
 
 #include "core/runtime/Platform.h"
+#include "core/runtime/RuntimeSettings.h"
 #include "core/runtime/runtime.h"
 #include "core/util/macros.h"
 
@@ -13,6 +14,17 @@ namespace core {
 namespace runtime {
 
 namespace {
+
+// Register `RuntimeCacheHandle` as a torchbind class so Python can pass the same
+// underlying `IRuntimeCache` to both Python and C++ engine backends. File I/O on
+// the handle is the Python side's responsibility; the C++ class only holds the
+// shared_ptr and an informational path string.
+static auto TORCHTRT_UNUSED RuntimeCacheHandleRegistration =
+    torch::class_<RuntimeCacheHandle>("tensorrt", "RuntimeCacheHandle")
+        .def(torch::init<std::string>())
+        .def("path", &RuntimeCacheHandle::path)
+        .def("set_path", &RuntimeCacheHandle::set_path);
+
 // TODO: Implement a call method
 // c10::List<at::Tensor> TRTEngine::Run(c10::List<at::Tensor> inputs) {
 //     auto input_vec = inputs.vec();
@@ -46,6 +58,18 @@ static auto TORCHTRT_UNUSED TRTEngineTSRegistrtion =
               self->set_resource_allocation_strategy(
                   dynamic ? TRTEngine::ResourceAllocationStrategy::kDynamic
                           : TRTEngine::ResourceAllocationStrategy::kStatic);
+            })
+        .def(
+            "update_runtime_settings",
+            [](const c10::intrusive_ptr<TRTEngine>& self,
+               std::string const& dynamic_shapes_kernel_specialization_strategy,
+               std::string const& cuda_graph_strategy,
+               c10::intrusive_ptr<RuntimeCacheHandle> runtime_cache) -> void {
+              RuntimeSettings rs;
+              rs.dynamic_shapes_kernel_specialization_strategy = dynamic_shapes_kernel_specialization_strategy;
+              rs.cuda_graph_strategy = cuda_graph_strategy;
+              rs.runtime_cache = std::move(runtime_cache);
+              self->update_runtime_settings(std::move(rs));
             })
         .def_readwrite("use_pre_allocated_outputs", &TRTEngine::use_pre_allocated_outputs)
         .def_readwrite("pre_allocated_outputs", &TRTEngine::pre_allocated_outputs)
@@ -147,10 +171,6 @@ TORCH_LIBRARY(tensorrt, m) {
     return false;
 #endif
   });
-  m.def("HAS_RUNTIME_CFG_IDX", []() -> int64_t { return HAS_RUNTIME_CFG_IDX; });
-  m.def("RUNTIME_CACHE_PATH_IDX", []() -> int64_t { return RUNTIME_CACHE_PATH_IDX; });
-  m.def("DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX", []() -> int64_t { return DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX; });
-  m.def("CUDA_GRAPH_STRATEGY_IDX", []() -> int64_t { return CUDA_GRAPH_STRATEGY_IDX; });
   m.def("_platform_linux_x86_64", []() -> std::string {
     auto it = get_platform_name_map().find(Platform::PlatformEnum::kLINUX_X86_64);
     return it->second;

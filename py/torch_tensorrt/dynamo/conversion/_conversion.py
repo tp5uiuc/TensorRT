@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import io
 import logging
-from typing import Any, Dict, List, NamedTuple, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Dict, List, NamedTuple, Optional, Sequence
 
 import tensorrt as trt
 import torch
+
+if TYPE_CHECKING:
+    from torch_tensorrt.runtime._runtime_settings import RuntimeSettings
 from torch_tensorrt._enums import dtype
 from torch_tensorrt._features import ENABLED_FEATURES
 from torch_tensorrt._Input import Input
@@ -333,6 +336,7 @@ def convert_module(
     settings: CompilationSettings = CompilationSettings(),
     name: str = "",
     engine_cache: Optional[BaseEngineCache] = None,
+    runtime_settings: Optional["RuntimeSettings"] = None,
 ) -> TorchTensorRTModule:
     """Convert an FX module to a TRT module
     Args:
@@ -341,6 +345,8 @@ def convert_module(
         settings: Compilation settings
         name: TRT engine name
         engine_cache: Engine cache instance
+        runtime_settings: Optional runtime-mode-control overrides threaded to the
+            built ``TRTEngine``. Not part of ``CompilationSettings``; not serialized.
     Returns:
         TorchTensorRTModule
     """
@@ -379,4 +385,5 @@ def convert_module(
         requires_output_allocator=serialized_interpreter_result.requires_output_allocator,
         requires_native_multidevice=serialized_interpreter_result.requires_native_multidevice,
         symbolic_shape_expressions=serialized_interpreter_result.symbolic_shape_expressions,
+        runtime_settings=runtime_settings,
     )

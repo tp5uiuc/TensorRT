@@ -249,7 +249,7 @@ std::vector<at::Tensor> execute_engine(std::vector<at::Tensor> inputs, c10::intr
     // CudaGraphsTorchTensorRTModule for whole-graph capture), engine-internal capture would
     // collide, so we disable it one-shot here.
     bool effective_cudagraphs = cudagraphs_enabled;
-    if (compiled_engine->runtime_cfg.uses_internal_capture(cudagraphs_enabled)) {
+    if (TRTRuntimeConfig::uses_internal_capture(compiled_engine->runtime_settings(), cudagraphs_enabled)) {
       effective_cudagraphs = false;
       cudaStreamCaptureStatus capture_status;
       cudaStreamIsCapturing(compiled_engine->engine_stream.stream(), &capture_status);

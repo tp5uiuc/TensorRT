@@ -4,7 +4,7 @@ import base64
 import copy
 import logging
 import pickle
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import torch
 from torch_tensorrt._Device import Device
@@ -14,11 +14,8 @@ from torch_tensorrt.dynamo._settings import CompilationSettings
 from torch_tensorrt.dynamo.runtime._serialized_engine_layout import (
     ABI_TARGET_IDX,
     ABI_VERSION,
-    CUDA_GRAPH_STRATEGY_IDX,
     DEVICE_IDX,
-    DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX,
     ENGINE_IDX,
-    HAS_RUNTIME_CFG_IDX,
     HW_COMPATIBLE_IDX,
     INPUT_BINDING_NAMES_IDX,
     NAME_IDX,
@@ -26,7 +23,6 @@ from torch_tensorrt.dynamo.runtime._serialized_engine_layout import (
     REQUIRES_NATIVE_MULTIDEVICE_IDX,
     REQUIRES_OUTPUT_ALLOCATOR_IDX,
     RESOURCE_ALLOCATION_STRATEGY_IDX,
-    RUNTIME_CACHE_PATH_IDX,
     SERIALIZATION_LEN,
     SERIALIZED_METADATA_IDX,
     TARGET_PLATFORM_IDX,
@@ -34,6 +30,9 @@ from torch_tensorrt.dynamo.runtime._serialized_engine_layout import (
     serialize_binding_names,
     serialize_device_info,
 )
+
+if TYPE_CHECKING:
+    from torch_tensorrt.runtime._runtime_settings import RuntimeSettings
 
 logger = logging.getLogger(__name__)
 
@@ -43,16 +42,6 @@ SerializedTorchTensorRTModuleFmt = Tuple[
     List[str],
     List[str],
 ]
-
-_DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP: Dict[str, int] = {
-    "lazy": 0,
-    "eager": 1,
-    "none": 2,
-}
-_CUDA_GRAPH_STRATEGY_MAP: Dict[str, int] = {
-    "disabled": 0,
-    "whole_graph_capture": 1,
-}
 
 
 class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
@@ -79,6 +68,7 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
         requires_output_allocator: bool = False,
         requires_native_multidevice: bool = False,
         symbolic_shape_expressions: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+        runtime_settings: Optional["RuntimeSettings"] = None,
     ):
         """Takes a name, target device, serialized TensorRT engine, and binding names / order and constructs
         a PyTorch ``torch.nn.Module`` around it. Uses the Torch-TensorRT runtime extension to run the engines
@@ -146,25 +136,12 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
         self.execute_engine_op: Any = None
         self.requires_output_allocator = requires_output_allocator
         self.dynamically_allocate_resources = settings.dynamically_allocate_resources
-        self.runtime_cache_path = settings.runtime_cache_path
-        self.dynamic_shapes_kernel_specialization_strategy = (
-            settings.dynamic_shapes_kernel_specialization_strategy
-        )
-        if (
-            self.dynamic_shapes_kernel_specialization_strategy
-            not in _DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP
-        ):
-            raise ValueError(
-                f"Invalid dynamic_shapes_kernel_specialization_strategy "
-                f"{self.dynamic_shapes_kernel_specialization_strategy!r}; expected one of "
-                f"{list(_DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP.keys())}"
-            )
-        self.cuda_graph_strategy = settings.cuda_graph_strategy
-        if self.cuda_graph_strategy not in _CUDA_GRAPH_STRATEGY_MAP:
-            raise ValueError(
-                f"Invalid cuda_graph_strategy {self.cuda_graph_strategy!r}; expected one of "
-                f"{list(_CUDA_GRAPH_STRATEGY_MAP.keys())}"
-            )
+
+        # Per-engine runtime mode controls. Defaults to ``RuntimeSettings()`` if
+        # not supplied; the dataclass validates at ``__post_init__``.
+        from torch_tensorrt.runtime._runtime_settings import RuntimeSettings
+
+        self._runtime_settings: RuntimeSettings = runtime_settings or RuntimeSettings()
         self.symbolic_shape_expressions = symbolic_shape_expressions
         self.requires_native_multidevice = requires_native_multidevice
         self.target_platform = (
@@ -261,18 +238,9 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
         engine_info[REQUIRES_NATIVE_MULTIDEVICE_IDX] = str(
             int(self.requires_native_multidevice)
         )
-        # rank/world_size are runtime facts; queried from ProcessGroup at execution time
-        engine_info[HAS_RUNTIME_CFG_IDX] = "1" if ENABLED_FEATURES.tensorrt_rtx else "0"
-        engine_info[RUNTIME_CACHE_PATH_IDX] = self.runtime_cache_path or ""
-        engine_info[DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX] = str(
-            _DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP[
-                self.dynamic_shapes_kernel_specialization_strategy
-            ]
-        )
-        engine_info[CUDA_GRAPH_STRATEGY_IDX] = str(
-            _CUDA_GRAPH_STRATEGY_MAP[self.cuda_graph_strategy]
-        )
-
+        # rank/world_size are runtime facts; queried from ProcessGroup at execution time.
+        # RuntimeSettings are intentionally NOT serialized: they're per-engine, in-memory
+        # init values, not part of the engine's identity (see pytorch/TensorRT#4310).
         return engine_info
 
     def get_streamable_device_memory_budget(self) -> Any:
@@ -306,6 +274,52 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
             self.dynamically_allocate_resources
         )
 
+    # --- runtime-settings dispatch ----------------------------------------
+
+    @property
+    def runtime_settings(self) -> "RuntimeSettings":
+        """The current ``RuntimeSettings`` on this module (and its engine).
+
+        This is the snapshot the ``runtime_config`` CM reads at ``__enter__``
+        and restores at ``__exit__``.
+        """
+        return self._runtime_settings
+
+    def set_runtime_settings(self, rs: "RuntimeSettings") -> None:
+        """Apply ``RuntimeSettings`` to all TRT engines under this module.
+
+        Walks ``named_modules()`` so calling on a wrapper / parent
+        ``nn.Module`` propagates to every contained
+        ``TorchTensorRTModule``. Dispatches to the Python ``TRTEngine`` or
+        the C++ ``torch.classes.tensorrt.Engine`` per submodule's backend.
+        """
+        for _, mod in self.named_modules():
+            if isinstance(mod, TorchTensorRTModule) and mod.engine is not None:
+                mod._dispatch_runtime_settings_to_engine(rs)
+                mod._runtime_settings = rs
+
+    def _dispatch_runtime_settings_to_engine(self, rs: "RuntimeSettings") -> None:
+        """Backend-aware dispatch of ``update_runtime_settings(rs)`` to ``self.engine``."""
+        if self.engine is None:
+            return
+        from torch_tensorrt.dynamo.runtime._TRTEngine import TRTEngine
+
+        if isinstance(self.engine, TRTEngine):
+            # Python runtime: dataclass passes straight through.
+            self.engine.update_runtime_settings(rs)
+            return
+
+        # C++ torchbind engine: flatten the dataclass into positional args. The
+        # cache field is converted to a torchbind RuntimeCacheHandle (or None).
+        from torch_tensorrt.runtime._runtime_cache import _to_torchbind_handle
+
+        cache_arg = _to_torchbind_handle(rs.runtime_cache)
+        self.engine.update_runtime_settings(
+            rs.dynamic_shapes_kernel_specialization_strategy,
+            rs.cuda_graph_strategy,
+            cache_arg,
+        )
+
     def setup_engine(self) -> None:
         """
         Setup engine for a module which has deferred engine setup.
@@ -324,11 +338,14 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
             self.engine = TRTEngine(
                 self._pack_engine_info(),
                 profile_execution=self.profiling_enabled,
+                runtime_settings=self._runtime_settings,
             )
             self.execute_engine_op = torch.ops.tensorrt.execute_engine_python
         else:
             self.engine = torch.classes.tensorrt.Engine(self._pack_engine_info())
             self.execute_engine_op = torch.ops.tensorrt.execute_engine
+            # Apply runtime settings to the C++ engine (no-op if defaults).
+            self._dispatch_runtime_settings_to_engine(self._runtime_settings)
 
         # requires_native_multidevice is set by the C++ constructor from the serialized REQUIRES_NATIVE_MULTIDEVICE_IDX field.
         if self.engine.requires_native_multidevice:
@@ -432,10 +449,17 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
                 getattr(self.settings, "use_python_runtime", False)
                 or not ENABLED_FEATURES.torch_tensorrt_runtime
             )
+            # RuntimeSettings are NOT serialized; restore defaults. Caller can
+            # reapply via ``compiled.set_runtime_settings(...)`` or a CM after load.
+            from torch_tensorrt.runtime._runtime_settings import RuntimeSettings
+
+            self._runtime_settings = RuntimeSettings()
             if self._use_python_runtime:
                 from torch_tensorrt.dynamo.runtime._TRTEngine import TRTEngine
 
-                self.engine = TRTEngine(serialized_engine_info)
+                self.engine = TRTEngine(
+                    serialized_engine_info, runtime_settings=self._runtime_settings
+                )
                 self.execute_engine_op = torch.ops.tensorrt.execute_engine_python
             else:
                 self.engine = torch.classes.tensorrt.Engine(serialized_engine_info)

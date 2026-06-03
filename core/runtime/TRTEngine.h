@@ -14,6 +14,7 @@
 #include "c10/cuda/CUDAStream.h"
 #include "torch/custom_class.h"
 
+#include "core/runtime/RuntimeSettings.h"
 #include "core/runtime/TRTEngineProfiler.h"
 #include "core/runtime/TRTRuntimeConfig.h"
 #include "core/runtime/TensorRTBindingNames.h"
@@ -48,11 +49,7 @@ using FlattenedState = std::tuple<
     std::tuple<std::string, std::string>, // serialized metadata
     std::tuple<std::string, std::string>, // Platform
     std::tuple<std::string, std::string>, // Resource Allocation Strategy
-    std::tuple<std::string, std::string>, // requires_native_multidevice
-    std::tuple<std::string, std::string>, // has_runtime_cfg (gates next three)
-    std::tuple<std::string, std::string>, // Runtime Cache Path (TRT-RTX)
-    std::tuple<std::string, std::string>, // Dynamic Shapes Kernel Strategy (TRT-RTX)
-    std::tuple<std::string, std::string> // CUDA Graph Strategy (TRT-RTX)
+    std::tuple<std::string, std::string> // requires_native_multidevice
     >;
 
 struct TorchTRTRuntimeStates {
@@ -158,7 +155,7 @@ struct TRTEngine : torch::CustomClassHolder {
       const std::string& serialized_metadata = "",
       const TRTEngine::ResourceAllocationStrategy resource_allocation_strategy =
           TRTEngine::ResourceAllocationStrategy::kStatic,
-      TRTRuntimeConfig runtime_cfg = TRTRuntimeConfig{});
+      RuntimeSettings runtime_settings = RuntimeSettings{});
 
   TRTEngine(std::vector<std::string> serialized_info);
 
@@ -174,7 +171,7 @@ struct TRTEngine : torch::CustomClassHolder {
       const std::string& serialized_metadata = "",
       const TRTEngine::ResourceAllocationStrategy resource_allocation_strategy =
           TRTEngine::ResourceAllocationStrategy::kStatic,
-      TRTRuntimeConfig runtime_cfg = TRTRuntimeConfig{});
+      RuntimeSettings runtime_settings = RuntimeSettings{});
 
   std::string to_str() const;
   static void verify_serialization_fmt(const std::vector<std::string>& serialized_info);
@@ -282,17 +279,32 @@ struct TRTEngine : torch::CustomClassHolder {
   void set_resource_allocation_strategy(ResourceAllocationStrategy new_strategy);
   ResourceAllocationStrategy get_resource_allocation_strategy();
 
-  // Owns the IRuntimeConfig (where supported) and TRT-RTX runtime state. On older TRT
-  // without IRuntimeConfig (e.g. Jetpack) this just carries strategy values that get
-  // passed to the legacy createExecutionContext overload.
+  // Live IRuntimeConfig wrapper. Settings are sourced from `runtime_settings_` at
+  // every (re)build. On non-RTX or pre-10.11 TRT this is essentially empty.
   TRTRuntimeConfig runtime_cfg;
+
+  // Current user-facing runtime settings. Initialized from the constructor's
+  // `runtime_settings` param; mutated by `update_runtime_settings`.
+  RuntimeSettings runtime_settings_;
+  [[nodiscard]] RuntimeSettings const& runtime_settings() const noexcept {
+    return runtime_settings_;
+  }
+
+  // Apply new runtime settings. Fast-paths on equality. On change, rebuilds the
+  // IRuntimeConfig from the new settings and recreates the execution context.
+  void update_runtime_settings(RuntimeSettings new_settings);
+
+  // Whether the engine has any input binding with a dynamic dimension. Computed
+  // once during construction; used by `is_monolithic_capturable`.
+  bool has_dynamic_inputs = true;
 
   // Monolithic-capturability check used when this engine is wrapped by an outer whole-graph
   // capture (e.g. CudaGraphsTorchTensorRTModule). Non-RTX builds always return true.
   bool is_monolithic_capturable(cudaStream_t stream) const;
 
   // Disable TensorRT-RTX native CUDA graph capture on this engine (one-shot, invoked when
-  // an outer stream capture is detected around execute_engine). No-op on non-RTX.
+  // an outer stream capture is detected around execute_engine). No-op on non-RTX or when
+  // already disabled.
   void disable_rtx_native_cudagraphs();
 
  private:

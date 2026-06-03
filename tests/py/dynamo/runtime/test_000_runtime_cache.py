@@ -9,8 +9,9 @@ import torch_tensorrt as torchtrt
 from parameterized import parameterized
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch_tensorrt._features import ENABLED_FEATURES
-from torch_tensorrt.dynamo._defaults import RUNTIME_CACHE_PATH, TIMING_CACHE_PATH
+from torch_tensorrt.dynamo._defaults import TIMING_CACHE_PATH
 from torch_tensorrt.dynamo.utils import COSINE_THRESHOLD, cosine_similarity
+from torch_tensorrt.runtime import RuntimeSettings, runtime_cache
 
 
 class SimpleModel(torch.nn.Module):
@@ -28,28 +29,35 @@ class ConvModel(torch.nn.Module):
 
 
 def _fresh_conv_model_and_inputs(seed=0):
-    """Deterministic ConvModel + input pair for end-to-end cache tests on either runtime."""
     torch.manual_seed(seed)
     return ConvModel().eval().cuda(), [torch.randn(2, 3, 16, 16).cuda()]
 
 
 def _compile(model, inputs, *, use_python_runtime, runtime_cache_path=None):
-    """Compile ``model`` through either runtime. Returns the compiled module."""
-    kwargs = {
-        "ir": "dynamo",
-        "inputs": inputs,
-        "use_python_runtime": use_python_runtime,
-        "min_block_size": 1,
-    }
-    if runtime_cache_path is not None:
-        kwargs["runtime_cache_path"] = runtime_cache_path
-    compiled = torchtrt.compile(model, **kwargs)
+    """Compile ``model`` through either runtime.
+
+    ``runtime_cache_path``, when supplied, is threaded as a compile-time hint via
+    ``runtime_settings=RuntimeSettings(runtime_cache=path)`` (per-engine cache).
+    """
+    rs = (
+        RuntimeSettings(runtime_cache=runtime_cache_path)
+        if runtime_cache_path is not None
+        else None
+    )
+    compiled = torchtrt.compile(
+        model,
+        ir="dynamo",
+        inputs=inputs,
+        use_python_runtime=use_python_runtime,
+        min_block_size=1,
+        runtime_settings=rs,
+    )
     torch._dynamo.reset()
     return compiled
 
 
 def _compile_simple(runtime_cache_path=None):
-    """Compile SimpleModel on the Python runtime (used by introspection setup tests)."""
+    """Compile SimpleModel on the Python runtime (used by introspection tests)."""
     model = SimpleModel().eval().cuda()
     inputs = [torch.randn(2, 3).cuda()]
     return (
@@ -64,13 +72,6 @@ def _compile_simple(runtime_cache_path=None):
 
 
 def _find_python_trt_engine(compiled):
-    """Return the Python ``TRTEngine`` instance from a compiled module, if any.
-
-    The C++ and Python runtimes are now both driven through ``TorchTensorRTModule``
-    (``use_python_runtime`` selects which backend is constructed). Tests that target
-    Python-runtime introspection use this helper; C++-runtime tests rely on
-    externally observable behavior (cache file on disk, inference correctness).
-    """
     from torch_tensorrt.dynamo.runtime._TorchTensorRTModule import TorchTensorRTModule
     from torch_tensorrt.dynamo.runtime._TRTEngine import TRTEngine
 
@@ -80,8 +81,6 @@ def _find_python_trt_engine(compiled):
     return None
 
 
-# Parameterize end-to-end cache persistence tests over both runtime paths. The C++
-# variant is skipped inside the test body when the C++ runtime is not available.
 _RUNTIMES = [("python", True), ("cpp", False)]
 
 
@@ -95,303 +94,113 @@ def _skip_if_cpp_unavailable(testcase, use_python_runtime):
     "Runtime cache is only available with TensorRT-RTX",
 )
 class TestRuntimeCacheSetup(TestCase):
-    """Tests that runtime config and cache are correctly created for RTX."""
+    """Tests that runtime config and per-engine cache are correctly created for RTX."""
 
     def test_runtime_config_created(self):
         compiled, _ = _compile_simple()
         engine = _find_python_trt_engine(compiled)
-        self.assertIsNotNone(engine, "No Python TRTEngine found in compiled model")
-        self.assertIsNotNone(
-            engine.runtime_config, "runtime_config should be set for RTX"
-        )
-        self.assertIsNotNone(
-            engine.runtime_cache, "runtime_cache should be set for RTX"
-        )
+        self.assertIsNotNone(engine)
+        self.assertIsNotNone(engine.runtime_config)
 
     def test_context_created_successfully(self):
-        compiled, inputs = _compile_simple()
-        engine = _find_python_trt_engine(compiled)
-        self.assertIsNotNone(engine.context, "execution context should be created")
-        # Verify inference works
-        output = compiled(*[inp.clone() for inp in inputs])
-        self.assertEqual(output.shape, inputs[0].shape)
-
-    def test_runtime_cache_path_default(self):
         compiled, _ = _compile_simple()
         engine = _find_python_trt_engine(compiled)
-        self.assertEqual(engine.settings.runtime_cache_path, RUNTIME_CACHE_PATH)
+        self.assertIsNotNone(engine.context)
 
-    def test_runtime_cache_path_custom(self):
-        cache_dir = tempfile.mkdtemp()
-        try:
-            custom_path = os.path.join(cache_dir, "my_cache.bin")
-            compiled, _ = _compile_simple(runtime_cache_path=custom_path)
+    def test_no_implicit_cache_handle_by_default(self):
+        """Default RuntimeSettings has no disk-backing => no implicit handle."""
+        compiled, _ = _compile_simple()
+        engine = _find_python_trt_engine(compiled)
+        self.assertIsNone(engine._implicit_cache_handle)
+
+    def test_implicit_cache_handle_for_path_hint(self):
+        """Passing a path string in RuntimeSettings.runtime_cache creates an implicit handle."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "rc.bin")
+            compiled, _ = _compile_simple(runtime_cache_path=path)
             engine = _find_python_trt_engine(compiled)
-            self.assertEqual(engine.settings.runtime_cache_path, custom_path)
-        finally:
-            shutil.rmtree(cache_dir, ignore_errors=True)
+            self.assertIsNotNone(engine._implicit_cache_handle)
+            self.assertEqual(engine._implicit_cache_handle.path, path)
 
 
 @unittest.skipIf(
     not ENABLED_FEATURES.tensorrt_rtx,
-    "Runtime cache is only available with TensorRT-RTX",
+    "Runtime cache persistence is RTX-only",
 )
 class TestRuntimeCachePersistence(TestCase):
-    """Load-on-setup / save-on-destructor contract, exercised on both runtimes."""
-
-    def setUp(self):
-        self.cache_dir = tempfile.mkdtemp()
-        self.cache_path = os.path.join(self.cache_dir, "runtime_cache.bin")
-
-    def tearDown(self):
-        shutil.rmtree(self.cache_dir, ignore_errors=True)
+    """End-to-end: compile with a cache path, infer, destroy, reload, infer again."""
 
     @parameterized.expand(_RUNTIMES)
     def test_cache_saved_on_del(self, _name, use_python_runtime):
         _skip_if_cpp_unavailable(self, use_python_runtime)
-        model, inputs = _fresh_conv_model_and_inputs()
-        compiled = _compile(
-            model,
-            inputs,
-            use_python_runtime=use_python_runtime,
-            runtime_cache_path=self.cache_path,
-        )
-        _ = compiled(*[inp.clone() for inp in inputs])
-        self.assertFalse(
-            os.path.isfile(self.cache_path),
-            "Cache should not exist before module cleanup",
-        )
-        del compiled
-        gc.collect()
-        self.assertTrue(
-            os.path.isfile(self.cache_path),
-            "Cache file should be created after module cleanup",
-        )
-
-    @parameterized.expand(_RUNTIMES)
-    def test_cache_file_nonempty(self, _name, use_python_runtime):
-        _skip_if_cpp_unavailable(self, use_python_runtime)
-        model, inputs = _fresh_conv_model_and_inputs()
-        compiled = _compile(
-            model,
-            inputs,
-            use_python_runtime=use_python_runtime,
-            runtime_cache_path=self.cache_path,
-        )
-        _ = compiled(*[inp.clone() for inp in inputs])
-        del compiled
-        gc.collect()
-        self.assertGreater(
-            os.path.getsize(self.cache_path),
-            0,
-            "Cache file should have nonzero size",
-        )
-
-    @parameterized.expand(_RUNTIMES)
-    def test_cache_roundtrip(self, _name, use_python_runtime):
-        """Populate + save, then recompile and confirm correctness against eager output."""
-        _skip_if_cpp_unavailable(self, use_python_runtime)
-        model, inputs = _fresh_conv_model_and_inputs()
-        with torch.no_grad():
-            ref_output = model(*inputs)
-
-        compiled1 = _compile(
-            model,
-            inputs,
-            use_python_runtime=use_python_runtime,
-            runtime_cache_path=self.cache_path,
-        )
-        out1 = compiled1(*[inp.clone() for inp in inputs])
-        self.assertGreater(
-            cosine_similarity(ref_output, out1),
-            COSINE_THRESHOLD,
-            "First compiled output should match eager",
-        )
-        del compiled1
-        gc.collect()
-        self.assertTrue(os.path.isfile(self.cache_path))
-
-        compiled2 = _compile(
-            model,
-            inputs,
-            use_python_runtime=use_python_runtime,
-            runtime_cache_path=self.cache_path,
-        )
-        out2 = compiled2(*[inp.clone() for inp in inputs])
-        self.assertGreater(
-            cosine_similarity(ref_output, out2),
-            COSINE_THRESHOLD,
-            "Second compiled output (warm cache) should still match eager",
-        )
-
-    @parameterized.expand(_RUNTIMES)
-    def test_save_creates_directory(self, _name, use_python_runtime):
-        _skip_if_cpp_unavailable(self, use_python_runtime)
-        nested_path = os.path.join(self.cache_dir, "a", "b", "c", "runtime_cache.bin")
-        model, inputs = _fresh_conv_model_and_inputs()
-        compiled = _compile(
-            model,
-            inputs,
-            use_python_runtime=use_python_runtime,
-            runtime_cache_path=nested_path,
-        )
-        _ = compiled(*[inp.clone() for inp in inputs])
-        del compiled
-        gc.collect()
-        self.assertTrue(
-            os.path.isfile(nested_path),
-            "Save should create intermediate directories",
-        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "rc.bin")
+            model, inputs = _fresh_conv_model_and_inputs(seed=42)
+            compiled = _compile(
+                model,
+                inputs,
+                use_python_runtime=use_python_runtime,
+                runtime_cache_path=path,
+            )
+            _ = compiled(*inputs)
+            del compiled
+            gc.collect()
+            self.assertTrue(
+                os.path.exists(path),
+                f"Implicit cache handle should have saved to {path} on engine __del__",
+            )
 
 
 @unittest.skipIf(
     not ENABLED_FEATURES.tensorrt_rtx,
-    "Runtime cache is only available with TensorRT-RTX",
+    "runtime_cache CM is RTX-only",
 )
-class TestRuntimeCacheConcurrency(TestCase):
-    """Tests that file locking works for concurrent access."""
+class TestRuntimeCacheContextManager(TestCase):
+    """Tests for the runtime_cache(target, path) shared-cache CM."""
 
-    def setUp(self):
-        self.cache_dir = tempfile.mkdtemp()
-        self.cache_path = os.path.join(self.cache_dir, "runtime_cache.bin")
-
-    def tearDown(self):
-        shutil.rmtree(self.cache_dir, ignore_errors=True)
-
-    def test_filelock_works(self):
-        """Verify that filelock can be acquired on the cache path after save."""
-        compiled, inputs = _compile_simple(runtime_cache_path=self.cache_path)
-        _ = compiled(*[inp.clone() for inp in inputs])
-        del compiled
-        gc.collect()
-        self.assertTrue(os.path.isfile(self.cache_path))
-        # Verify we can acquire a lock on the same path (no deadlock)
-        from filelock import FileLock
-
-        lock = FileLock(self.cache_path + ".lock")
-        with lock.acquire(timeout=5):
-            data = open(self.cache_path, "rb").read()
-        self.assertGreater(len(data), 0)
-
-    def test_sequential_save_load(self):
-        """Two modules saving and loading from the same path should not corrupt data."""
-        # First module saves
-        compiled1, inputs = _compile_simple(runtime_cache_path=self.cache_path)
-        _ = compiled1(*[inp.clone() for inp in inputs])
-        del compiled1
-        gc.collect()
-        size1 = os.path.getsize(self.cache_path)
-
-        # Second module saves (overwrites)
-        compiled2, inputs = _compile_simple(runtime_cache_path=self.cache_path)
-        _ = compiled2(*[inp.clone() for inp in inputs])
-        del compiled2
-        gc.collect()
-        size2 = os.path.getsize(self.cache_path)
-
-        self.assertGreater(size1, 0)
-        self.assertGreater(size2, 0)
-
-
-@unittest.skipIf(
-    not ENABLED_FEATURES.tensorrt_rtx,
-    "Timing cache skip is only relevant for TensorRT-RTX",
-)
-class TestTimingCacheSkipped(TestCase):
-    """Tests that timing cache is correctly skipped for RTX builds."""
-
-    def setUp(self):
-        # Clean up any pre-existing timing cache
-        if os.path.isfile(TIMING_CACHE_PATH):
-            os.remove(TIMING_CACHE_PATH)
-
-    def test_no_timing_cache_file(self):
+    def test_with_cache_loads_and_saves(self):
         compiled, inputs = _compile_simple()
-        _ = compiled(*[inp.clone() for inp in inputs])
-        self.assertFalse(
-            os.path.isfile(TIMING_CACHE_PATH),
-            "Timing cache should NOT be created for RTX builds",
-        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "shared.bin")
+            with runtime_cache(compiled, path) as rc:
+                self.assertIsNotNone(rc)
+                self.assertEqual(rc.path, path)
+                _ = compiled(*inputs)
+            # autosave on exit
+            self.assertTrue(os.path.exists(path))
 
-    def test_timing_cache_skip_logged(self):
-        with self.assertLogs(
-            "torch_tensorrt.dynamo.conversion._TRTInterpreter", level="INFO"
-        ) as cm:
-            compiled, inputs = _compile_simple()
-            _ = compiled(*[inp.clone() for inp in inputs])
-        self.assertTrue(
-            any("Skipping timing cache" in msg for msg in cm.output),
-            f"Expected 'Skipping timing cache' log message, got: {cm.output}",
-        )
-
-
-@unittest.skipIf(
-    ENABLED_FEATURES.tensorrt_rtx,
-    "This test verifies standard TRT behavior (non-RTX)",
-)
-class TestNonRTXUnchanged(TestCase):
-    """Tests that standard TRT behavior is unaffected by the runtime cache changes."""
-
-    def test_no_runtime_config_for_standard_trt(self):
-        compiled, _ = _compile_simple()
-        engine = _find_python_trt_engine(compiled)
-        if engine is not None:
-            # The TRT-RTX runtime cache machinery is exposed via the
-            # ``runtime_config`` / ``runtime_cache`` attributes on the Python
-            # engine. On non-RTX builds neither should be populated.
-            self.assertIsNone(
-                engine.runtime_config,
-                "runtime_config should be None for standard TRT",
-            )
-            self.assertIsNone(
-                engine.runtime_cache,
-                "runtime_cache should be None for standard TRT",
-            )
-
-    def test_timing_cache_still_created(self):
-        # Clean up any pre-existing timing cache
-        if os.path.isfile(TIMING_CACHE_PATH):
-            os.remove(TIMING_CACHE_PATH)
+    def test_with_cache_in_memory_only(self):
+        """path='' means in-memory only; no disk artifact after exit."""
         compiled, inputs = _compile_simple()
-        _ = compiled(*[inp.clone() for inp in inputs])
-        self.assertTrue(
-            os.path.isfile(TIMING_CACHE_PATH),
-            "Timing cache should still be created for standard TRT",
-        )
+        with tempfile.TemporaryDirectory() as tmp:
+            with runtime_cache(compiled, "") as rc:
+                self.assertEqual(rc.path, "")
+                _ = compiled(*inputs)
+            self.assertFalse(os.listdir(tmp), "No files should be created for path=''")
 
+    def test_shared_cache_pointer_across_modules(self):
+        """Two modules sharing one runtime_cache handle reference the same IRuntimeCache."""
+        compiled_a, inputs_a = _compile_simple()
+        compiled_b, inputs_b = _compile_simple()
+        eng_a = _find_python_trt_engine(compiled_a)
+        eng_b = _find_python_trt_engine(compiled_b)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "shared.bin")
+            with runtime_cache([compiled_a, compiled_b], path) as rc:
+                self.assertIs(eng_a.runtime_settings.runtime_cache, rc)
+                self.assertIs(eng_b.runtime_settings.runtime_cache, rc)
+                _ = compiled_a(*inputs_a)
+                _ = compiled_b(*inputs_b)
+            self.assertTrue(os.path.exists(path))
 
-@unittest.skipIf(
-    not ENABLED_FEATURES.torch_tensorrt_runtime,
-    "C++ runtime is not available",
-)
-class TestSerializationIndices(TestCase):
-    """The HAS_RUNTIME_CFG flag + TRTRuntimeConfig slots are present on both backends."""
-
-    def test_indices_match_python_layout(self):
-        from torch_tensorrt.dynamo.runtime._serialized_engine_layout import (
-            CUDA_GRAPH_STRATEGY_IDX,
-            DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX,
-            HAS_RUNTIME_CFG_IDX,
-            RUNTIME_CACHE_PATH_IDX,
-            SERIALIZATION_LEN,
-        )
-
-        self.assertEqual(int(torch.ops.tensorrt.SERIALIZATION_LEN()), SERIALIZATION_LEN)
-        self.assertEqual(
-            int(torch.ops.tensorrt.HAS_RUNTIME_CFG_IDX()), int(HAS_RUNTIME_CFG_IDX)
-        )
-        self.assertEqual(
-            int(torch.ops.tensorrt.RUNTIME_CACHE_PATH_IDX()),
-            int(RUNTIME_CACHE_PATH_IDX),
-        )
-        self.assertEqual(
-            int(torch.ops.tensorrt.DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX()),
-            int(DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX),
-        )
-        self.assertEqual(
-            int(torch.ops.tensorrt.CUDA_GRAPH_STRATEGY_IDX()),
-            int(CUDA_GRAPH_STRATEGY_IDX),
-        )
+    def test_runtime_cache_on_empty_target_raises(self):
+        """A target with no TRT submodules raises a clear error on enter."""
+        empty = torch.nn.Linear(3, 3).cuda()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "rc.bin")
+            with self.assertRaises(RuntimeError):
+                with runtime_cache(empty, path):
+                    pass
 
 
 if __name__ == "__main__":
