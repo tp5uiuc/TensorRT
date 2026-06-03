@@ -231,14 +231,16 @@ def runtime_cache(
 # at dispatch time the Python module converts to/from the torchbind class as
 # needed (see ``TorchTensorRTModule.set_runtime_settings``).
 def _to_torchbind_handle(
-    rc: Union[None, str, "RuntimeCacheHandle"],
+    rc: Union[None, str, "RuntimeCacheHandle", Any],
 ) -> Any:
     """Convert a Python-side ``runtime_cache`` value to a torchbind handle
     suitable for ``torch.classes.tensorrt.Engine.update_runtime_settings(...)``.
 
     Returns ``None`` if no runtime cache is requested. Raises if the C++
     runtime isn't loaded (caller shouldn't dispatch to a C++ engine in that
-    case anyway).
+    case anyway). Already-torchbind handles (``torch.ScriptObject``) are passed
+    through unchanged so callers can pre-stash a handle on the module and
+    share it across dispatch calls.
     """
     if rc is None:
         return None
@@ -247,5 +249,7 @@ def _to_torchbind_handle(
             "torch_tensorrt C++ runtime is not available; cannot construct "
             "torch.classes.tensorrt.RuntimeCacheHandle"
         )
+    if isinstance(rc, torch.ScriptObject):
+        return rc
     path = rc if isinstance(rc, str) else rc.path
     return torch.classes.tensorrt.RuntimeCacheHandle(path)

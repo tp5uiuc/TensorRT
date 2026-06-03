@@ -3,7 +3,9 @@ from __future__ import annotations
 import base64
 import copy
 import logging
+import os
 import pickle
+import shutil
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import torch
@@ -344,8 +346,36 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
         else:
             self.engine = torch.classes.tensorrt.Engine(self._pack_engine_info())
             self.execute_engine_op = torch.ops.tensorrt.execute_engine
+            # If the compile-time hint was a path string, pre-materialize a
+            # torchbind RuntimeCacheHandle here so we (a) own a Python-side
+            # reference that survives until the module is collected, and (b)
+            # can save the cache to disk in __del__ (the C++ engine has no
+            # Python __del__; file I/O lives on the Python side). Substitute
+            # the handle for the string in the settings so the dispatch
+            # passes the same handle through to TorchBind.
+            rc = self._runtime_settings.runtime_cache
+            if isinstance(rc, str) and rc:
+                handle = torch.classes.tensorrt.RuntimeCacheHandle(rc)
+                self._cpp_implicit_cache_handle = handle
+                self._cpp_implicit_cache_path = rc
+                self._runtime_settings = self._runtime_settings.merge(
+                    runtime_cache=handle
+                )
+                # Pre-load any existing on-disk cache so the engine sees
+                # warm contents on first inference. The first engine attach
+                # materializes the IRuntimeCache via createRuntimeCache().
+                self._cpp_implicit_handle_pending_load = True
+            else:
+                self._cpp_implicit_cache_handle = None
+                self._cpp_implicit_cache_path = None
+                self._cpp_implicit_handle_pending_load = False
             # Apply runtime settings to the C++ engine (no-op if defaults).
             self._dispatch_runtime_settings_to_engine(self._runtime_settings)
+            # After dispatch the IRuntimeCache exists inside the handle; load
+            # the on-disk bytes (filelocked) so they're picked up on first run.
+            if self._cpp_implicit_handle_pending_load:
+                self._load_cpp_implicit_cache()
+                self._cpp_implicit_handle_pending_load = False
 
         # requires_native_multidevice is set by the C++ constructor from the serialized REQUIRES_NATIVE_MULTIDEVICE_IDX field.
         if self.engine.requires_native_multidevice:
@@ -376,6 +406,70 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
             # for torch.compile models where the engine lives in dynamo's
             # code cache and isn't reachable via module tree walking.
             register_md_engine(self.engine)
+
+    def _load_cpp_implicit_cache(self) -> None:
+        """Deserialize on-disk cache bytes into the torchbind handle.
+
+        Mirrors :py:meth:`RuntimeCacheHandle.load` for the C++ runtime path.
+        No-op on first run (file absent) or if the IRuntimeCache hasn't been
+        materialized yet inside the C++ engine.
+        """
+        handle = getattr(self, "_cpp_implicit_cache_handle", None)
+        path = getattr(self, "_cpp_implicit_cache_path", None)
+        if handle is None or not path or not handle.has_cache():
+            return
+        if not os.path.exists(path):
+            return
+        try:
+            from filelock import FileLock
+
+            with FileLock(path + ".lock").acquire(timeout=10):
+                with open(path, "rb") as f:
+                    data = f.read()
+            if data:
+                # The torchbind `deserialize` takes a uint8 tensor; we wrap the
+                # raw bytes via ``frombuffer`` for a zero-copy view.
+                tensor = torch.frombuffer(bytearray(data), dtype=torch.uint8)
+                handle.deserialize(tensor)
+                logger.debug(f"Loaded runtime cache from {path} ({len(data)} bytes)")
+        except Exception as e:
+            logger.debug(f"Failed to load runtime cache from {path}: {e}")
+
+    def _save_cpp_implicit_cache(self) -> None:
+        """Serialize the torchbind handle's IRuntimeCache to disk under filelock.
+
+        Called from __del__. Suppresses all exceptions because __del__ may
+        run during interpreter shutdown when imports / filesystem ops can
+        fail in unpredictable ways.
+        """
+        handle = getattr(self, "_cpp_implicit_cache_handle", None)
+        path = getattr(self, "_cpp_implicit_cache_path", None)
+        if handle is None or not path:
+            return
+        try:
+            if not handle.has_cache():
+                return
+            tensor = handle.serialize()
+            if tensor.numel() == 0:
+                return
+            data = bytes(tensor.cpu().contiguous().numpy())
+            from filelock import FileLock
+
+            parent = os.path.dirname(path)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            tmp = path + ".tmp"
+            with FileLock(path + ".lock").acquire(timeout=10):
+                with open(tmp, "wb") as f:
+                    f.write(data)
+                shutil.move(tmp, path)
+            logger.debug(f"Saved runtime cache to {path} ({len(data)} bytes)")
+        except Exception:
+            # Best-effort: never raise out of __del__.
+            pass
+
+    def __del__(self) -> None:
+        self._save_cpp_implicit_cache()
 
     def encode_metadata(self, metadata: Any) -> str:
         metadata = copy.deepcopy(metadata)

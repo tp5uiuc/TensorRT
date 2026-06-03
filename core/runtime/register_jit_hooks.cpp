@@ -23,7 +23,57 @@ static auto TORCHTRT_UNUSED RuntimeCacheHandleRegistration =
     torch::class_<RuntimeCacheHandle>("tensorrt", "RuntimeCacheHandle")
         .def(torch::init<std::string>())
         .def("path", &RuntimeCacheHandle::path)
-        .def("set_path", &RuntimeCacheHandle::set_path);
+        .def("set_path", &RuntimeCacheHandle::set_path)
+        // Expose the underlying IRuntimeCache bytes to Python so the Python-
+        // side save/load logic can persist them under filelock. Returns an
+        // empty uint8 tensor if the cache hasn't been materialized yet.
+        //
+        // We return ``at::Tensor`` rather than ``std::string`` because TorchBind
+        // forces ``std::string`` to round-trip through Python ``str`` (UTF-8)
+        // and serialized cache bytes are not valid UTF-8.
+        .def(
+            "serialize",
+            [](const c10::intrusive_ptr<RuntimeCacheHandle>& self) -> at::Tensor {
+#ifdef TRT_MAJOR_RTX
+              auto opts = at::TensorOptions().dtype(at::kByte);
+              if (!self->cache) {
+                return at::empty({0}, opts);
+              }
+              auto host_mem = make_trt(self->cache->serialize());
+              if (!host_mem) {
+                return at::empty({0}, opts);
+              }
+              auto tensor = at::empty({static_cast<int64_t>(host_mem->size())}, opts);
+              std::memcpy(tensor.data_ptr(), host_mem->data(), host_mem->size());
+              return tensor;
+#else
+              return at::empty({0}, at::TensorOptions().dtype(at::kByte));
+#endif
+            })
+        // Deserialize bytes loaded from disk into the underlying IRuntimeCache.
+        // Expects a uint8 ``at::Tensor``. No-op for empty input or if the
+        // IRuntimeCache hasn't been materialized yet.
+        .def(
+            "deserialize",
+            [](const c10::intrusive_ptr<RuntimeCacheHandle>& self, at::Tensor data) -> void {
+#ifdef TRT_MAJOR_RTX
+              if (data.numel() == 0 || !self->cache) {
+                return;
+              }
+              auto contig = data.contiguous().to(at::kCPU);
+              self->cache->deserialize(contig.data_ptr(), static_cast<size_t>(contig.numel()));
+#else
+              (void)data;
+#endif
+            })
+        // True iff an engine has populated the underlying IRuntimeCache.
+        .def("has_cache", [](const c10::intrusive_ptr<RuntimeCacheHandle>& self) -> bool {
+#ifdef TRT_MAJOR_RTX
+          return self->cache != nullptr;
+#else
+          return false;
+#endif
+        });
 
 // TODO: Implement a call method
 // c10::List<at::Tensor> TRTEngine::Run(c10::List<at::Tensor> inputs) {
@@ -64,11 +114,13 @@ static auto TORCHTRT_UNUSED TRTEngineTSRegistrtion =
             [](const c10::intrusive_ptr<TRTEngine>& self,
                std::string const& dynamic_shapes_kernel_specialization_strategy,
                std::string const& cuda_graph_strategy,
-               c10::intrusive_ptr<RuntimeCacheHandle> runtime_cache) -> void {
+               c10::optional<c10::intrusive_ptr<RuntimeCacheHandle>> runtime_cache) -> void {
+              // `c10::optional` lets TorchBind accept Python `None` here. We
+              // translate to a (possibly null) intrusive_ptr inside the struct.
               RuntimeSettings rs;
               rs.dynamic_shapes_kernel_specialization_strategy = dynamic_shapes_kernel_specialization_strategy;
               rs.cuda_graph_strategy = cuda_graph_strategy;
-              rs.runtime_cache = std::move(runtime_cache);
+              rs.runtime_cache = runtime_cache.has_value() ? std::move(*runtime_cache) : nullptr;
               self->update_runtime_settings(std::move(rs));
             })
         .def_readwrite("use_pre_allocated_outputs", &TRTEngine::use_pre_allocated_outputs)
