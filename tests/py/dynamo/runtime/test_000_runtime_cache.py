@@ -154,6 +154,65 @@ class TestRuntimeCachePersistence(TestCase):
                 f"Implicit cache handle should have saved to {path} on engine __del__",
             )
 
+    @parameterized.expand(_RUNTIMES)
+    def test_set_runtime_settings_saves_prior_cache_on_swap(
+        self, _name, use_python_runtime
+    ):
+        """Re-pointing ``runtime_cache`` via ``set_runtime_settings`` must save
+        the prior implicit cache before swapping. Mirrors the explicit-save
+        semantic in :py:meth:`TRTRuntimeConfig.set_settings` for the Python
+        runtime; the C++ runtime path replicates it via
+        :py:meth:`TorchTensorRTModule._materialize_cpp_implicit_handle`.
+        """
+        _skip_if_cpp_unavailable(self, use_python_runtime)
+        from torch_tensorrt.dynamo.runtime._TorchTensorRTModule import (
+            TorchTensorRTModule,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path_a = os.path.join(tmp, "cache_A.bin")
+            path_b = os.path.join(tmp, "cache_B.bin")
+            model, inputs = _fresh_conv_model_and_inputs(seed=42)
+            compiled = _compile(
+                model,
+                inputs,
+                use_python_runtime=use_python_runtime,
+                runtime_cache_path=path_a,
+            )
+            _ = compiled(*inputs)
+            # Sanity: no file written yet (nothing has saved).
+            self.assertFalse(os.path.exists(path_a))
+
+            # Walk to the inner TorchTensorRTModule(s) and swap the cache path
+            # directly -- the outer GraphModule doesn't carry `set_runtime_settings`,
+            # and we want a *permanent* swap (the runtime_config CM restores on
+            # exit, which would mask the save-on-swap signal we're after). The
+            # walk is wrapped in a helper so the loop variable doesn't outlive
+            # the call and keep the inner module alive past ``del compiled``.
+            def _swap_all(target: torch.nn.Module, new_rs: RuntimeSettings) -> int:
+                count = 0
+                for _, mod in target.named_modules():
+                    if isinstance(mod, TorchTensorRTModule):
+                        mod.set_runtime_settings(new_rs)
+                        count += 1
+                return count
+
+            swapped = _swap_all(compiled, RuntimeSettings(runtime_cache=path_b))
+            self.assertGreater(swapped, 0, "Expected at least one TorchTensorRTModule")
+            self.assertTrue(
+                os.path.exists(path_a),
+                f"Prior implicit cache should have been saved to {path_a} "
+                "synchronously on set_runtime_settings swap",
+            )
+            _ = compiled(*inputs)
+            del compiled
+            gc.collect()
+            self.assertTrue(
+                os.path.exists(path_b),
+                f"New implicit cache should have saved to {path_b} on engine "
+                "__del__ after the swap",
+            )
+
 
 @unittest.skipIf(
     not ENABLED_FEATURES.tensorrt_rtx,
