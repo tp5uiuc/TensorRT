@@ -56,6 +56,7 @@ static auto TORCHTRT_UNUSED TRTEngineTSRegistrtion =
         .def("reset_captured_graph", &TRTEngine::reset_captured_graph)
         .def("set_output_tensors_as_unowned", &TRTEngine::set_output_tensors_as_unowned)
         .def("are_output_tensors_unowned", &TRTEngine::are_output_tensors_unowned)
+        .def("num_execution_contexts_created", &TRTEngine::num_execution_contexts_created)
         .def(
             "use_dynamically_allocated_resources",
             [](const c10::intrusive_ptr<TRTEngine>& self, bool dynamic) -> void {

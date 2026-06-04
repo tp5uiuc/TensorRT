@@ -212,6 +212,11 @@ void create_output_allocator(c10::intrusive_ptr<TRTEngine> compiled_engine) {
 }
 
 std::vector<at::Tensor> execute_engine(std::vector<at::Tensor> inputs, c10::intrusive_ptr<TRTEngine> compiled_engine) {
+  // Materialize the IExecutionContext on the first execute (under the lazy-create
+  // policy the ctor and ``update_runtime_settings`` no longer eagerly build one).
+  // Idempotent: a non-null exec_ctx is left untouched.
+  compiled_engine->ensure_execution_context();
+
   // All inputs are expected to be on CUDA. Warn and move any that are not.
   for (auto& inp : inputs) {
     if (inp.defined() && !inp.is_cuda()) {

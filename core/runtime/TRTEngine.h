@@ -307,9 +307,33 @@ struct TRTEngine : torch::CustomClassHolder {
   // already disabled.
   void disable_rtx_native_cudagraphs();
 
+  // Materialize ``exec_ctx`` if it is currently null, using the current settings
+  // from ``runtime_cfg``. Idempotent: a non-null ``exec_ctx`` is left untouched.
+  // Called from every site that needs the live context (``execute_engine``,
+  // ``enable_profiling``, ``bind_nccl_comm``, ``infer_outputs``, etc.).
+  void ensure_execution_context();
+
+  // Drop the live ``exec_ctx`` without recreating. The next ``ensure_execution_context``
+  // (typically inside the next ``execute_engine`` call) will rebuild from the
+  // current ``runtime_cfg`` settings.
+  void invalidate_execution_context() noexcept;
+
+  // Test/observability hook: increments once every time ``runtime_cfg.create_execution_context``
+  // is invoked (i.e. an actual TRT createExecutionContext call, which on RTX
+  // also JIT-compiles the specialized kernel set). Bound on the torchbind class.
+  // ``noexcept`` is intentionally omitted -- torchbind's ``def`` template is
+  // not specialized for ``const noexcept`` member functions.
+  [[nodiscard]] int64_t num_execution_contexts_created() const {
+    return num_execution_contexts_created_;
+  }
+
  private:
   // Single entry point that (re)creates exec_ctx via runtime_cfg.create_execution_context.
+  // Bumps ``num_execution_contexts_created_``. Callers should normally go through
+  // ``ensure_execution_context`` for the lazy semantics.
   void recreate_execution_context();
+
+  int64_t num_execution_contexts_created_ = 0;
 };
 
 } // namespace runtime

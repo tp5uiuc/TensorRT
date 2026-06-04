@@ -175,5 +175,139 @@ class TestRuntimeConfigInvalidKey(TestCase):
             runtime_config(target, not_a_real_field=True)
 
 
+@unittest.skipIf(
+    not ENABLED_FEATURES.tensorrt_rtx,
+    "Lazy IExecutionContext count is meaningful only on TRT-RTX",
+)
+class TestLazyExecutionContextCreation(TestCase):
+    """Regression guard: each setup creates exactly one IExecutionContext.
+
+    On RTX, ``createExecutionContext`` JIT-compiles the specialized kernel set,
+    so a redundant create doubles a non-trivial chunk of setup latency. The
+    historical cpp-runtime path did two creates per engine setup -- one in the
+    torchbind ctor with defaults, one in the post-construction
+    ``update_runtime_settings`` dispatch. The lazy-create policy collapses these
+    into a single create at first execute.
+    """
+
+    def _walk_engines(self, compiled):
+        from torch_tensorrt.dynamo.runtime._TorchTensorRTModule import (
+            TorchTensorRTModule,
+        )
+
+        for _, mod in compiled.named_modules():
+            if isinstance(mod, TorchTensorRTModule):
+                yield mod
+
+    def _skip_if_cpp_unavailable(self, use_python_runtime):
+        if not use_python_runtime and not ENABLED_FEATURES.torch_tensorrt_runtime:
+            self.skipTest("C++ runtime is not available")
+
+    @parameterized.expand(_RUNTIMES)
+    def test_one_context_create_with_default_settings(self, _name, use_python_runtime):
+        self._skip_if_cpp_unavailable(use_python_runtime)
+        compiled = _compile_simple(use_python_runtime=use_python_runtime)
+        ttrt_modules = list(self._walk_engines(compiled))
+        self.assertTrue(ttrt_modules, "Expected at least one TorchTensorRTModule")
+        # Setup itself must not have created the context yet on the cpp path
+        # (Python runtime engine constructs the context inside its own __init__
+        # *after* settings are applied, so 1 is correct there too).
+        for mod in ttrt_modules:
+            n = mod.engine.num_execution_contexts_created()
+            if use_python_runtime:
+                # Python runtime threads runtime_settings into the engine ctor
+                # directly, so the single create lives there.
+                self.assertEqual(n, 1, f"Python runtime expected 1 create, got {n}")
+            else:
+                # Cpp path defers until first execute.
+                self.assertEqual(
+                    n, 0, f"Cpp runtime expected 0 creates at setup, got {n}"
+                )
+
+        inputs = [torch.randn(2, 3).cuda()]
+        _ = compiled(*inputs)
+        for mod in ttrt_modules:
+            n = mod.engine.num_execution_contexts_created()
+            self.assertEqual(
+                n, 1, f"Expected exactly 1 create after first execute, got {n}"
+            )
+
+    @parameterized.expand(_RUNTIMES)
+    def test_one_context_create_with_compile_time_settings(
+        self, _name, use_python_runtime
+    ):
+        """User-passed RuntimeSettings at compile time must not double-create.
+
+        This is the regression case the lazy-create refactor addresses on cpp:
+        old behaviour did ctor-create-with-defaults + dispatch-recreate. The
+        observable count after first execute must be 1.
+        """
+        self._skip_if_cpp_unavailable(use_python_runtime)
+        rs = RuntimeSettings(cuda_graph_strategy="whole_graph_capture")
+        compiled = _compile_simple(
+            runtime_settings=rs, use_python_runtime=use_python_runtime
+        )
+        ttrt_modules = list(self._walk_engines(compiled))
+        self.assertTrue(ttrt_modules)
+        inputs = [torch.randn(2, 3).cuda()]
+        _ = compiled(*inputs)
+        for mod in ttrt_modules:
+            n = mod.engine.num_execution_contexts_created()
+            self.assertEqual(
+                n,
+                1,
+                f"Setup + first execute must perform exactly 1 createExecutionContext; "
+                f"got {n} on {'python' if use_python_runtime else 'cpp'} runtime",
+            )
+
+    @parameterized.expand(_RUNTIMES)
+    def test_set_runtime_settings_lazy_recreate(self, _name, use_python_runtime):
+        """Changing settings invalidates the context but the recreate is lazy:
+        the count bumps on the next execute, not on the set call."""
+        self._skip_if_cpp_unavailable(use_python_runtime)
+        compiled = _compile_simple(use_python_runtime=use_python_runtime)
+        ttrt_modules = list(self._walk_engines(compiled))
+        inputs = [torch.randn(2, 3).cuda()]
+        _ = compiled(*inputs)
+        for mod in ttrt_modules:
+            self.assertEqual(mod.engine.num_execution_contexts_created(), 1)
+
+        new_rs = RuntimeSettings(cuda_graph_strategy="whole_graph_capture")
+        for mod in ttrt_modules:
+            mod.set_runtime_settings(new_rs)
+            # set itself does not eagerly recreate on the cpp path.
+            if not use_python_runtime:
+                self.assertEqual(mod.engine.num_execution_contexts_created(), 1)
+
+        _ = compiled(*inputs)
+        for mod in ttrt_modules:
+            n = mod.engine.num_execution_contexts_created()
+            self.assertEqual(
+                n,
+                2,
+                f"Expected exactly 2 creates after settings flip + execute, got {n}",
+            )
+
+    @parameterized.expand(_RUNTIMES)
+    def test_no_op_settings_change_does_not_recreate(self, _name, use_python_runtime):
+        """Re-applying the same RuntimeSettings is a no-op: no invalidate, no
+        recreate, count is stable across follow-up executes."""
+        self._skip_if_cpp_unavailable(use_python_runtime)
+        rs = RuntimeSettings(cuda_graph_strategy="whole_graph_capture")
+        compiled = _compile_simple(
+            runtime_settings=rs, use_python_runtime=use_python_runtime
+        )
+        ttrt_modules = list(self._walk_engines(compiled))
+        inputs = [torch.randn(2, 3).cuda()]
+        _ = compiled(*inputs)
+        baseline = [mod.engine.num_execution_contexts_created() for mod in ttrt_modules]
+
+        for mod in ttrt_modules:
+            mod.set_runtime_settings(rs)  # identical to existing
+        _ = compiled(*inputs)
+        for mod, prior in zip(ttrt_modules, baseline):
+            self.assertEqual(mod.engine.num_execution_contexts_created(), prior)
+
+
 if __name__ == "__main__":
     run_tests()

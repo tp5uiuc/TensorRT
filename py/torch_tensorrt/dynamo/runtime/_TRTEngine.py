@@ -436,7 +436,20 @@ class TRTEngine(OpaqueBase):  # type: ignore[misc]
             self.cuda_engine, alloc_strategy
         )
         assert context is not None, "Failed to create execution context"
+        # Mirrors ``TRTEngine::num_execution_contexts_created`` on the C++ side;
+        # used by tests to assert single createExecutionContext per engine setup.
+        self._num_execution_contexts_created = (
+            getattr(self, "_num_execution_contexts_created", 0) + 1
+        )
         return context
+
+    def num_execution_contexts_created(self) -> int:
+        """Number of TRT ``createExecutionContext`` invocations on this engine.
+
+        Each call (re)JITs the specialized kernel set on RTX, so this is the
+        canonical counter for the setup-cost regression test.
+        """
+        return getattr(self, "_num_execution_contexts_created", 0)
 
     def _setup_engine(self) -> None:
         multi_gpu_device_check()

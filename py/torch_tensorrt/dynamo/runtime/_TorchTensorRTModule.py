@@ -351,6 +351,18 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
         old = self._implicit_cache_handle  # type: ignore[has-type]
         rc = rs.runtime_cache
         if isinstance(rc, str) and rc:
+            # No-op fast path: if the prior wrapper is already pointed at the
+            # same disk path and still holds its torchbind sibling, reuse it.
+            # Without this the cpp ``set_settings`` sees a *different*
+            # ``runtime_cache.get()`` pointer every call and invalidates the
+            # execution context even when the user passed identical settings.
+            if (
+                old is not None
+                and getattr(old, "path", None) == rc
+                and old._torchbind is not None
+            ):
+                rs_for_dispatch = rs.merge(runtime_cache=old._torchbind)
+                return rs_for_dispatch, False
             tb = torch.classes.tensorrt.RuntimeCacheHandle(rc)
             new = RuntimeCacheHandle(path=rc, autosave_on_del=True, torchbind_handle=tb)
             self._implicit_cache_handle = new
