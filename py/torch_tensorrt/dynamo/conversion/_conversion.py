@@ -2,13 +2,10 @@ from __future__ import annotations
 
 import io
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List, NamedTuple, Optional, Sequence
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence
 
 import tensorrt as trt
 import torch
-
-if TYPE_CHECKING:
-    from torch_tensorrt.runtime._runtime_config import RuntimeSettings
 from torch_tensorrt._enums import dtype
 from torch_tensorrt._features import ENABLED_FEATURES
 from torch_tensorrt._Input import Input
@@ -28,6 +25,7 @@ from torch_tensorrt.dynamo.utils import (
     release_host_and_device_memory,
 )
 from torch_tensorrt.logging import TRT_LOGGER
+from torch_tensorrt.runtime._runtime_config import RuntimeSettings
 
 logger = logging.getLogger(__name__)
 
@@ -336,7 +334,7 @@ def convert_module(
     settings: CompilationSettings = CompilationSettings(),
     name: str = "",
     engine_cache: Optional[BaseEngineCache] = None,
-    runtime_settings: Optional["RuntimeSettings"] = None,
+    runtime_settings: Optional[RuntimeSettings] = None,
 ) -> TorchTensorRTModule:
     """Convert an FX module to a TRT module
     Args:

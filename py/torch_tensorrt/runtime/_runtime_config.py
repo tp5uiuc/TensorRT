@@ -36,11 +36,21 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from dataclasses import dataclass
+import warnings
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, Optional, Sequence, Tuple, Union
 
 import torch
 from torch_tensorrt._features import ENABLED_FEATURES
+from torch_tensorrt.dynamo._defaults import (
+    CUDA_GRAPH_STRATEGY,
+    DYNAMIC_SHAPES_KERNEL_SPECIALIZATION_STRATEGY,
+    RUNTIME_CACHE_PATH,
+)
+
+# Single-shot guard for the non-RTX construction warning -- emit once per
+# process, not once per RuntimeSettings instance.
+_NON_RTX_WARNING_EMITTED = False
 
 if TYPE_CHECKING:
     from torch_tensorrt.runtime._runtime_cache import RuntimeCacheHandle
@@ -82,9 +92,13 @@ class RuntimeSettings:
     by identity (same handle ⇒ same cache).
     """
 
-    dynamic_shapes_kernel_specialization_strategy: str = "lazy"
-    cuda_graph_strategy: str = "disabled"
-    runtime_cache: Optional[Union[str, "RuntimeCacheHandle"]] = None  # noqa: F821
+    dynamic_shapes_kernel_specialization_strategy: str = (
+        DYNAMIC_SHAPES_KERNEL_SPECIALIZATION_STRATEGY
+    )
+    cuda_graph_strategy: str = CUDA_GRAPH_STRATEGY
+    runtime_cache: Optional[Union[str, "RuntimeCacheHandle"]] = field(  # noqa: F821
+        default_factory=lambda: RUNTIME_CACHE_PATH
+    )
 
     def __post_init__(self) -> None:
         if (
@@ -101,6 +115,18 @@ class RuntimeSettings:
                 f"Invalid cuda_graph_strategy: {self.cuda_graph_strategy!r}. "
                 f"Expected one of {list(_CUDA_GRAPH_STRATEGY_MAP)}."
             )
+        # RuntimeSettings only takes effect on TRT-RTX builds. Warn once per
+        # process on regular TRT so users don't silently expect cache /
+        # strategy plumbing to do anything.
+        global _NON_RTX_WARNING_EMITTED
+        if not ENABLED_FEATURES.tensorrt_rtx and not _NON_RTX_WARNING_EMITTED:
+            warnings.warn(
+                "RuntimeSettings is only honored on TRT-RTX builds; "
+                "constructing it on regular TensorRT has no effect.",
+                UserWarning,
+                stacklevel=2,
+            )
+            _NON_RTX_WARNING_EMITTED = True
 
     def merge(self, **overrides: Any) -> "RuntimeSettings":
         """Return a new ``RuntimeSettings`` with ``overrides`` applied on top of self."""
@@ -386,3 +412,36 @@ def runtime_config(
     by-reference -- same object the caller passed in.
     """
     return _RuntimeConfigContextManager(target_or_targets, **overrides)
+
+
+# ---------------------------------------------------------------------------
+# Sugar wrappers for the two strategy knobs
+# ---------------------------------------------------------------------------
+
+
+def set_dynamic_shapes_kernel_strategy(
+    target_or_targets: Union["torch.nn.Module", Sequence["torch.nn.Module"]],
+    strategy: str,
+) -> _RuntimeConfigContextManager:
+    """Context manager that sets the dynamic-shapes kernel specialization
+    strategy on all TRT engines under ``target_or_targets``.
+
+    Accepts ``"lazy"``, ``"eager"``, or ``"none"``. Delegates to
+    :func:`runtime_config`.
+    """
+    return runtime_config(
+        target_or_targets, dynamic_shapes_kernel_specialization_strategy=strategy
+    )
+
+
+def set_cuda_graph_strategy(
+    target_or_targets: Union["torch.nn.Module", Sequence["torch.nn.Module"]],
+    strategy: str,
+) -> _RuntimeConfigContextManager:
+    """Context manager that sets the cuda-graph strategy on all TRT engines
+    under ``target_or_targets``.
+
+    Accepts ``"disabled"`` or ``"whole_graph_capture"``. Delegates to
+    :func:`runtime_config`.
+    """
+    return runtime_config(target_or_targets, cuda_graph_strategy=strategy)

@@ -16,7 +16,6 @@ import tempfile
 from contextlib import nullcontext
 from types import SimpleNamespace
 from typing import (
-    TYPE_CHECKING,
     Any,
     ContextManager,
     Dict,
@@ -30,12 +29,6 @@ from typing import (
 import torch
 import torch.distributed as dist
 import torch_tensorrt
-
-if TYPE_CHECKING:
-    from torch_tensorrt.runtime._runtime_config import (
-        RuntimeSettings,
-        TRTRuntimeConfig,
-    )
 from torch._library.opaque_object import register_opaque_type
 from torch._opaque_base import OpaqueBase
 from torch_tensorrt._enums import dtype
@@ -62,6 +55,7 @@ from torch_tensorrt.dynamo.runtime._serialized_engine_layout import (
 )
 from torch_tensorrt.dynamo.utils import DYNAMIC_DIM
 from torch_tensorrt.logging import TRT_LOGGER
+from torch_tensorrt.runtime._runtime_config import RuntimeSettings, TRTRuntimeConfig
 from torch_tensorrt.runtime._utils import (
     _is_switch_required,
     _select_rt_device,
@@ -216,14 +210,8 @@ class TRTEngine(OpaqueBase):  # type: ignore[misc]
         serialized_info: SerializedTensorRTEngineFmt,
         *,
         profile_execution: bool = False,
-        runtime_settings: Optional["RuntimeSettings"] = None,
+        runtime_settings: Optional[RuntimeSettings] = None,
     ) -> None:
-        # Import here to avoid a circular dep at module-import time.
-        from torch_tensorrt.runtime._runtime_config import (
-            RuntimeSettings,
-            TRTRuntimeConfig,
-        )
-
         self._profile_execution = profile_execution
         self.profile_path_prefix = tempfile.gettempdir()
         self.use_pre_allocated_outputs = False
@@ -263,7 +251,7 @@ class TRTEngine(OpaqueBase):  # type: ignore[misc]
     # --- public property forwards ---
 
     @property
-    def runtime_settings(self) -> "RuntimeSettings":
+    def runtime_settings(self) -> RuntimeSettings:
         """The current ``RuntimeSettings`` for this engine.
 
         Backed by ``self._trt_runtime_config.settings``; mutations go through
@@ -313,11 +301,6 @@ class TRTEngine(OpaqueBase):  # type: ignore[misc]
 
     def __setstate__(self, state: Any) -> None:
         """Restore from C++-matching pickle state ``(serialized_info,)``."""
-        from torch_tensorrt.runtime._runtime_config import (
-            RuntimeSettings,
-            TRTRuntimeConfig,
-        )
-
         self._profile_execution = False
         self.profile_path_prefix = tempfile.gettempdir()
         self.use_pre_allocated_outputs = False
@@ -539,7 +522,7 @@ class TRTEngine(OpaqueBase):  # type: ignore[misc]
 
     # --- TensorRT-RTX runtime-config delegation ---
 
-    def update_runtime_settings(self, new_settings: "RuntimeSettings") -> None:
+    def update_runtime_settings(self, new_settings: RuntimeSettings) -> None:
         """Apply new ``RuntimeSettings`` to this engine.
 
         Fast-paths on equality via ``TRTRuntimeConfig.set_settings``. On

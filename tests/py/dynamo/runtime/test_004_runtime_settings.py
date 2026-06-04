@@ -54,10 +54,13 @@ class TestRuntimeSettingsDataModel(TestCase):
     """Pure dataclass behavior; no engine compile required."""
 
     def test_defaults_are_valid(self):
+        from torch_tensorrt.dynamo._defaults import RUNTIME_CACHE_PATH
+
         rs = RuntimeSettings()
         self.assertEqual(rs.dynamic_shapes_kernel_specialization_strategy, "lazy")
         self.assertEqual(rs.cuda_graph_strategy, "disabled")
-        self.assertIsNone(rs.runtime_cache)
+        # Defaults to the per-user temp path from _defaults.py (mirrors ENGINE_CACHE_DIR).
+        self.assertEqual(rs.runtime_cache, RUNTIME_CACHE_PATH)
 
     def test_invalid_ds_strategy_raises_at_post_init(self):
         with self.assertRaises(ValueError):

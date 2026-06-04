@@ -4,7 +4,7 @@ import base64
 import copy
 import logging
 import pickle
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 from torch_tensorrt._Device import Device
@@ -30,9 +30,7 @@ from torch_tensorrt.dynamo.runtime._serialized_engine_layout import (
     serialize_binding_names,
     serialize_device_info,
 )
-
-if TYPE_CHECKING:
-    from torch_tensorrt.runtime._runtime_config import RuntimeSettings
+from torch_tensorrt.runtime._runtime_config import RuntimeSettings
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +66,7 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
         requires_output_allocator: bool = False,
         requires_native_multidevice: bool = False,
         symbolic_shape_expressions: Optional[Dict[str, List[Dict[str, Any]]]] = None,
-        runtime_settings: Optional["RuntimeSettings"] = None,
+        runtime_settings: Optional[RuntimeSettings] = None,
     ):
         """Takes a name, target device, serialized TensorRT engine, and binding names / order and constructs
         a PyTorch ``torch.nn.Module`` around it. Uses the Torch-TensorRT runtime extension to run the engines
@@ -139,8 +137,6 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
 
         # Per-engine runtime mode controls. Defaults to ``RuntimeSettings()`` if
         # not supplied; the dataclass validates at ``__post_init__``.
-        from torch_tensorrt.runtime._runtime_config import RuntimeSettings
-
         self._runtime_settings: RuntimeSettings = runtime_settings or RuntimeSettings()
         self.symbolic_shape_expressions = symbolic_shape_expressions
         self.requires_native_multidevice = requires_native_multidevice
@@ -277,7 +273,7 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
     # --- runtime-settings dispatch ----------------------------------------
 
     @property
-    def runtime_settings(self) -> "RuntimeSettings":
+    def runtime_settings(self) -> RuntimeSettings:
         """The current ``RuntimeSettings`` on this module (and its engine).
 
         This is the snapshot the ``runtime_config`` CM reads at ``__enter__``
@@ -285,7 +281,7 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
         """
         return self._runtime_settings
 
-    def set_runtime_settings(self, rs: "RuntimeSettings") -> None:
+    def set_runtime_settings(self, rs: RuntimeSettings) -> None:
         """Apply ``RuntimeSettings`` to all TRT engines under this module.
 
         Walks ``named_modules()`` so calling on a wrapper / parent
@@ -298,7 +294,7 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
                 mod._dispatch_runtime_settings_to_engine(rs)
                 mod._runtime_settings = rs
 
-    def _dispatch_runtime_settings_to_engine(self, rs: "RuntimeSettings") -> None:
+    def _dispatch_runtime_settings_to_engine(self, rs: RuntimeSettings) -> None:
         """Backend-aware dispatch of ``update_runtime_settings(rs)`` to ``self.engine``."""
         if self.engine is None:
             return
@@ -476,8 +472,6 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
             )
             # RuntimeSettings are NOT serialized; restore defaults. Caller can
             # reapply via ``compiled.set_runtime_settings(...)`` or a CM after load.
-            from torch_tensorrt.runtime._runtime_config import RuntimeSettings
-
             self._runtime_settings = RuntimeSettings()
             if self._use_python_runtime:
                 from torch_tensorrt.dynamo.runtime._TRTEngine import TRTEngine

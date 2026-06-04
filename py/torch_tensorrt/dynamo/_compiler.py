@@ -5,12 +5,9 @@ import logging
 import os
 import platform
 import warnings
-from typing import TYPE_CHECKING, Any, Collection, List, Optional, Sequence, Union
+from typing import Any, Collection, List, Optional, Sequence, Union
 
 import torch
-
-if TYPE_CHECKING:
-    from torch_tensorrt.runtime._runtime_config import RuntimeSettings
 from torch.export import ExportedProgram
 from torch.fx.node import Target
 from torch_tensorrt._Device import Device
@@ -56,6 +53,7 @@ from torch_tensorrt.dynamo.utils import (
     to_torch_device,
     to_torch_tensorrt_device,
 )
+from torch_tensorrt.runtime._runtime_config import RuntimeSettings
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +110,7 @@ def cross_compile_for_windows(
     dynamically_allocate_resources: bool = _defaults.DYNAMICALLY_ALLOCATE_RESOURCES,
     decompose_attention: bool = _defaults.DECOMPOSE_ATTENTION,
     attn_bias_is_causal: bool = _defaults.ATTN_BIAS_IS_CAUSAL,
-    runtime_settings: Optional["RuntimeSettings"] = None,
+    runtime_settings: Optional[RuntimeSettings] = None,
     **kwargs: Any,
 ) -> torch.fx.GraphModule:
     """Compile an ExportedProgram module using TensorRT in Linux for Inference in Windows
@@ -456,7 +454,7 @@ def compile(
     dynamically_allocate_resources: bool = _defaults.DYNAMICALLY_ALLOCATE_RESOURCES,
     decompose_attention: bool = _defaults.DECOMPOSE_ATTENTION,
     attn_bias_is_causal: bool = _defaults.ATTN_BIAS_IS_CAUSAL,
-    runtime_settings: Optional["RuntimeSettings"] = None,
+    runtime_settings: Optional[RuntimeSettings] = None,
     **kwargs: Any,
 ) -> torch.fx.GraphModule:
     """Compile an ExportedProgram module for NVIDIA GPUs using TensorRT
@@ -876,7 +874,7 @@ def compile_module(
     engine_cache: Optional[BaseEngineCache] = None,
     *,
     _debugger_config: Optional[DebuggerConfig] = None,
-    runtime_settings: Optional["RuntimeSettings"] = None,
+    runtime_settings: Optional[RuntimeSettings] = None,
 ) -> torch.fx.GraphModule:
     """Compile a traced FX module
 

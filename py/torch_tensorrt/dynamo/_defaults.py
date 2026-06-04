@@ -81,6 +81,19 @@ DEBUG_LOGGING_DIR = os.path.join(
     tempfile.gettempdir(), f"torch_tensorrt_{current_user}/debug_logs"
 )
 
+# ---------------------------------------------------------------------------
+# Runtime-only knobs (see torch_tensorrt.runtime.RuntimeSettings). Defaults
+# live here to mirror compilation-settings convention; the dataclass imports
+# from this module.
+# ---------------------------------------------------------------------------
+DYNAMIC_SHAPES_KERNEL_SPECIALIZATION_STRATEGY = "lazy"
+CUDA_GRAPH_STRATEGY = "disabled"
+# Default to a per-user temp file (mirrors ENGINE_CACHE_DIR). Users can override
+# via ``RuntimeSettings(runtime_cache="/different/path")`` or a runtime CM.
+RUNTIME_CACHE_PATH = os.path.join(
+    tempfile.gettempdir(), f"torch_tensorrt_{current_user}/runtime_cache.bin"
+)
+
 
 def default_device() -> Device:
     return Device(gpu_id=torch.cuda.current_device())

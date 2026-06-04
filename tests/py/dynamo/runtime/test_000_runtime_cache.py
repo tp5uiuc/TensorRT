@@ -107,11 +107,15 @@ class TestRuntimeCacheSetup(TestCase):
         engine = _find_python_trt_engine(compiled)
         self.assertIsNotNone(engine.context)
 
-    def test_no_implicit_cache_handle_by_default(self):
-        """Default RuntimeSettings has no disk-backing => no implicit handle."""
+    def test_default_uses_temp_path_implicit_handle(self):
+        """Default RuntimeSettings points runtime_cache at the per-user temp file
+        (see _defaults.RUNTIME_CACHE_PATH); the engine creates an implicit handle."""
+        from torch_tensorrt.dynamo._defaults import RUNTIME_CACHE_PATH
+
         compiled, _ = _compile_simple()
         engine = _find_python_trt_engine(compiled)
-        self.assertIsNone(engine._implicit_cache_handle)
+        self.assertIsNotNone(engine._implicit_cache_handle)
+        self.assertEqual(engine._implicit_cache_handle.path, RUNTIME_CACHE_PATH)
 
     def test_implicit_cache_handle_for_path_hint(self):
         """Passing a path string in RuntimeSettings.runtime_cache creates an implicit handle."""
