@@ -149,7 +149,7 @@ TRTEngine::TRTEngine(
     const std::string& serialized_metadata,
     const ResourceAllocationStrategy resource_allocation_strategy,
     RuntimeSettings runtime_settings) {
-  this->runtime_settings_ = std::move(runtime_settings);
+  this->runtime_cfg = TRTRuntimeConfig(std::move(runtime_settings));
   TORCHTRT_CHECK(
       is_supported_on_current_platform(target_platform),
       "This engine was not built to run on this platform (built for: " << target_platform << ", current platform: "
@@ -464,7 +464,7 @@ std::string TRTEngine::to_str() const {
   ss << "  Target Platform: " << target_platform << std::endl;
   ss << "  Resource Allocation Strategy: " << (resource_allocation_strategy == ResourceAllocationStrategy::kDynamic ? "Dynamic" : "Static") << std::endl;
   ss << "  Multi-Device Engine: " << (requires_native_multidevice) << std::endl;
-  ss << runtime_settings_.to_str();
+  ss << runtime_cfg.settings().to_str();
   // clang-format on
   return ss.str();
 }
@@ -658,31 +658,27 @@ void TRTEngine::release_nccl_comm() {
 #endif // ENABLE_TRT_NCCL_COLLECTIVES
 
 bool TRTEngine::is_monolithic_capturable(cudaStream_t stream) const {
-  return TRTRuntimeConfig::is_monolithic_capturable(runtime_settings_, has_dynamic_inputs, exec_ctx.get(), stream);
+  return runtime_cfg.is_monolithic_capturable(has_dynamic_inputs, exec_ctx.get(), stream);
 }
 
 void TRTEngine::disable_rtx_native_cudagraphs() {
 #ifdef TRT_MAJOR_RTX
-  if (runtime_settings_.cuda_graph_strategy == "disabled") {
+  if (runtime_cfg.settings().cuda_graph_strategy == "disabled") {
     return;
   }
   LOG_WARNING(
       "Outer CUDA stream capture detected; disabling TensorRT-RTX native CUDA graph strategy on engine "
       << name << " for the remainder of its lifetime.");
-  RuntimeSettings new_settings = runtime_settings_;
+  RuntimeSettings new_settings = runtime_cfg.settings();
   new_settings.cuda_graph_strategy = "disabled";
   update_runtime_settings(std::move(new_settings));
 #endif
 }
 
 void TRTEngine::update_runtime_settings(RuntimeSettings new_settings) {
-  if (new_settings == runtime_settings_) {
+  if (!runtime_cfg.set_settings(std::move(new_settings))) {
     return;
   }
-  runtime_settings_ = std::move(new_settings);
-  // Force the next ensure_initialized to rebuild the IRuntimeConfig with the new
-  // strategy values + (possibly) the new attached cache handle.
-  runtime_cfg.reset();
   recreate_execution_context();
   // Existing recreate sites set runtime_states.context_changed for cudagraph
   // re-record; do the same here so a settings flip inside an active CM forces
@@ -694,7 +690,7 @@ void TRTEngine::recreate_execution_context() {
   const auto allocation_strategy = resource_allocation_strategy == ResourceAllocationStrategy::kDynamic
       ? nvinfer1::ExecutionContextAllocationStrategy::kUSER_MANAGED
       : nvinfer1::ExecutionContextAllocationStrategy::kSTATIC;
-  exec_ctx = runtime_cfg.create_execution_context(cuda_engine.get(), runtime_settings_, allocation_strategy);
+  exec_ctx = runtime_cfg.create_execution_context(cuda_engine.get(), allocation_strategy);
   TORCHTRT_CHECK(exec_ctx.get() != nullptr, "Unable to (re)create TensorRT execution context");
 }
 

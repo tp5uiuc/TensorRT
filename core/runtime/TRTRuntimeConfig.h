@@ -4,35 +4,43 @@
 #include <memory>
 #include <ostream>
 #include <string>
+#include <utility>
 
 #include "NvInfer.h"
+#include "core/runtime/RuntimeSettings.h"
 
 namespace torch_tensorrt {
 namespace core {
 namespace runtime {
 
-struct RuntimeSettings;
-
-// Owns the live `IRuntimeConfig` (where supported) and the engine-local fallback
-// `IRuntimeCache` used when no external `RuntimeCacheHandle` is attached via
-// `RuntimeSettings`. The settings themselves (strategy strings, runtime_cache
-// handle) live on `RuntimeSettings`; this struct applies them to TRT at
-// `ensure_initialized` time.
+// Owns the canonical `RuntimeSettings` for an engine, the live `IRuntimeConfig`
+// derived from those settings (where supported), and translates strategy
+// strings into TRT calls. All `TRT_HAS_IRUNTIME_CONFIG` / `TRT_MAJOR_RTX`
+// branching is confined to this TU.
 //
-// `IRuntimeConfig` and runtime-cache `#ifdef`s are confined to this TU.
+// `TRTEngine` holds a `TRTRuntimeConfig` member; the engine itself does not
+// store a separate `RuntimeSettings`. `engine.runtime_settings()` forwards
+// here.
 struct TRTRuntimeConfig {
-  // Lazy-constructed live config. `nullptr` until first `ensure_initialized`.
-#ifdef TRT_HAS_IRUNTIME_CONFIG
-  std::shared_ptr<nvinfer1::IRuntimeConfig> config;
-#endif
+  TRTRuntimeConfig() = default;
+  explicit TRTRuntimeConfig(RuntimeSettings settings) : settings_(std::move(settings)) {}
 
-  // (Re)build the `IRuntimeConfig` from `rs`. Idempotent only if the previous
-  // `rs` was identical. Callers ensure the engine is the same across calls --
-  // we don't memoize against `cuda_engine` here.
-  void ensure_initialized(nvinfer1::ICudaEngine* cuda_engine, RuntimeSettings const& rs);
+  // Canonical user-facing runtime settings for this engine. Mutated only via
+  // `set_settings` so the live `IRuntimeConfig` stays in sync.
+  [[nodiscard]] RuntimeSettings const& settings() const noexcept {
+    return settings_;
+  }
 
-  // Force the next `ensure_initialized` to rebuild from scratch. Used when
-  // settings change at runtime.
+  // Returns true iff `new_settings` differs from the current settings (i.e.
+  // the caller should recreate the `IExecutionContext`). On change the live
+  // `IRuntimeConfig` is invalidated; the next `ensure_initialized` rebuilds.
+  bool set_settings(RuntimeSettings new_settings);
+
+  // (Re)build the `IRuntimeConfig` from `settings_`. Idempotent if the previous
+  // build was against identical settings.
+  void ensure_initialized(nvinfer1::ICudaEngine* cuda_engine);
+
+  // Force the next `ensure_initialized` to rebuild from scratch.
   void reset();
 
   // Lazy-init + create a fresh `IExecutionContext` honoring `allocation_strategy`.
@@ -41,21 +49,27 @@ struct TRTRuntimeConfig {
   // `TRT_HAS_IRUNTIME_CONFIG` branching.
   [[nodiscard]] std::shared_ptr<nvinfer1::IExecutionContext> create_execution_context(
       nvinfer1::ICudaEngine* cuda_engine,
-      RuntimeSettings const& rs,
       nvinfer1::ExecutionContextAllocationStrategy allocation_strategy);
 
-  // Returns true if TRT-RTX owns capture/replay for the given settings -- caller
-  // should then bypass its own `at::cuda::CUDAGraph` capture around enqueueV3.
-  // Always false on non-RTX builds.
-  [[nodiscard]] static bool uses_internal_capture(RuntimeSettings const& rs, bool cudagraphs_enabled) noexcept;
+  // Returns true if TRT-RTX owns capture/replay for the current settings --
+  // caller should then bypass its own `at::cuda::CUDAGraph` capture around
+  // enqueueV3. Always false on non-RTX builds.
+  [[nodiscard]] bool uses_internal_capture(bool cudagraphs_enabled) const noexcept;
 
   // Returns true iff the execution context can be safely included in an outer
   // monolithic capture. Non-RTX builds always return true.
-  [[nodiscard]] static bool is_monolithic_capturable(
-      RuntimeSettings const& rs,
+  [[nodiscard]] bool is_monolithic_capturable(
       bool has_dynamic_inputs,
       nvinfer1::IExecutionContext* exec_ctx,
-      cudaStream_t stream) noexcept;
+      cudaStream_t stream) const noexcept;
+
+#ifdef TRT_HAS_IRUNTIME_CONFIG
+  // Lazy-constructed live config. `nullptr` until first `ensure_initialized`.
+  std::shared_ptr<nvinfer1::IRuntimeConfig> config;
+#endif
+
+ private:
+  RuntimeSettings settings_;
 };
 
 std::ostream& operator<<(std::ostream& os, const TRTRuntimeConfig& cfg);

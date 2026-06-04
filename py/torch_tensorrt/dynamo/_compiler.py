@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, Collection, List, Optional, Sequence, Uni
 import torch
 
 if TYPE_CHECKING:
-    from torch_tensorrt.runtime._runtime_settings import RuntimeSettings
+    from torch_tensorrt.runtime._runtime_config import RuntimeSettings
 from torch.export import ExportedProgram
 from torch.fx.node import Target
 from torch_tensorrt._Device import Device

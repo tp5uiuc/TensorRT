@@ -31,84 +31,127 @@ _FILELOCK_TIMEOUT_S = 10.0
 
 
 class RuntimeCacheHandle:
-    """Wraps a ``trt.IRuntimeCache`` + optional disk path / autosave config.
+    """Wraps a ``trt.IRuntimeCache`` (or a torchbind sibling) + optional disk path.
 
-    Two ways an instance comes into being:
+    Three construction patterns differ in *who else holds a reference*, which
+    drives the ``autosave_on_del`` flag:
 
     1. **Engine-implicit** (compile-time hint): when an engine sees
-       ``RuntimeSettings(runtime_cache="/path")``, it materializes a
-       handle internally during ``_setup_runtime_config`` -- the engine
-       owns the lifecycle and saves on ``__del__``.
+       ``RuntimeSettings(runtime_cache="/path")``, the engine's
+       ``TRTRuntimeConfig`` materializes a handle internally with
+       ``autosave_on_del=True``. No other Python object holds the handle,
+       so ``__del__`` writes the cache to disk on the engine's last release.
 
-    2. **Runtime CM** (shared): the :func:`runtime_cache` CM bootstraps from
-       the first engine under target, creates a cache, wraps it here, and
-       attaches the handle to all engines for the duration of the ``with``
-       block. The CM saves on ``__exit__``.
+    2. **Runtime CM** (shared, multi-engine): the :func:`runtime_cache` CM
+       constructs a handle with ``autosave_on_del=False`` and explicitly
+       calls ``handle.save()`` on ``__exit__``. The handle's ``__del__``
+       no-ops since the CM already saved.
 
-    Both paths produce the same handle shape; the difference is who owns
-    the lifecycle.
+    3. **User-constructed** (advanced): hand-built handles default to
+       ``autosave_on_del=False`` so save timing stays under the user's
+       control. Opt in with ``RuntimeCacheHandle(path=..., autosave_on_del=True)``
+       for with-block-style autosave on hand-built handles.
+
+    Bytes are sourced from whichever of ``_cache`` (Python pybind
+    ``trt.IRuntimeCache``) or ``_torchbind`` (TorchBind
+    ``RuntimeCacheHandle`` sibling) is populated; the Python runtime path
+    populates the former, the C++ runtime path populates the latter.
     """
 
     def __init__(
         self,
         cache: Any = None,
         path: str = "",
-        autosave: bool = True,
+        autosave_on_del: bool = False,
+        torchbind_handle: Any = None,
     ) -> None:
-        # ``cache`` is a ``trt.IRuntimeCache`` once materialized. May be None
-        # at construction if the handle is built before any engine has had a
-        # chance to call ``runtime_config.create_runtime_cache()``.
+        # ``cache`` is a ``trt.IRuntimeCache`` once materialized (Python rt).
+        # ``torchbind_handle`` is a ``torch.classes.tensorrt.RuntimeCacheHandle``
+        # for the C++ runtime path, exposing serialize/deserialize as tensors.
+        # Exactly zero or one is populated for a given handle.
         self._cache = cache
+        self._torchbind = torchbind_handle
         self.path = path
-        self.autosave = autosave
+        self.autosave_on_del = autosave_on_del
         self._lock = threading.Lock()
 
     @property
     def cache(self) -> Any:
-        """The underlying ``trt.IRuntimeCache``. ``None`` if not yet materialized."""
+        """The underlying Python pybind ``trt.IRuntimeCache``. ``None`` if not yet materialized or if backed by a torchbind sibling."""
         return self._cache
 
     def ensure_cache(self, runtime_config: Any) -> Any:
-        """Idempotent. First caller materializes via ``runtime_config.create_runtime_cache()``."""
+        """Idempotent. First caller materializes via ``runtime_config.create_runtime_cache()``.
+
+        Only meaningful for the Python-runtime path (``_cache``). The C++
+        runtime materializes its cache inside the engine and exposes bytes
+        through the torchbind sibling.
+        """
         with self._lock:
             if self._cache is None:
                 self._cache = runtime_config.create_runtime_cache()
             return self._cache
 
-    def load(self, path: Optional[str] = None) -> None:
-        """Read bytes from disk and deserialize into ``self._cache``.
+    def _read_bytes(self) -> Optional[bytes]:
+        """Serialize whichever of ``_cache`` or ``_torchbind`` is populated."""
+        if self._cache is not None:
+            host_mem = self._cache.serialize()
+            if host_mem is None or host_mem.nbytes == 0:
+                return None
+            return bytes(memoryview(host_mem))
+        if self._torchbind is not None and self._torchbind.has_cache():
+            tensor = self._torchbind.serialize()
+            if tensor.numel() == 0:
+                return None
+            return bytes(tensor.cpu().contiguous().numpy())
+        return None
 
-        No-op if ``self._cache`` is None, the resolved path is empty, or the
-        file doesn't exist (first run). Caller must ensure no enqueue is
+    def _write_bytes(self, data: bytes) -> None:
+        """Deserialize ``data`` into whichever of ``_cache`` or ``_torchbind`` is populated."""
+        if self._cache is not None:
+            self._cache.deserialize(data)
+            return
+        if self._torchbind is not None and self._torchbind.has_cache():
+            tensor = torch.frombuffer(bytearray(data), dtype=torch.uint8)
+            self._torchbind.deserialize(tensor)
+            return
+
+    def load(self, path: Optional[str] = None) -> None:
+        """Read bytes from disk and deserialize into the underlying cache.
+
+        No-op if no cache backing is present, the resolved path is empty, or
+        the file doesn't exist (first run). Caller must ensure no enqueue is
         concurrently writing (the CM enforces this by ordering load before
-        engine attach; ``ensure_cache`` is called inside the engine setup).
+        engine attach; ``ensure_cache`` is called inside engine setup).
         """
         target = path if path is not None else self.path
-        if not target or self._cache is None:
+        if not target:
             return
-        from filelock import FileLock
-
+        if self._cache is None and self._torchbind is None:
+            return
         if not os.path.exists(target):
             return  # first run; nothing to load
+        from filelock import FileLock
+
         with FileLock(target + ".lock").acquire(timeout=_FILELOCK_TIMEOUT_S):
             with open(target, "rb") as f:
                 data = f.read()
         if data:
-            self._cache.deserialize(data)
+            self._write_bytes(data)
             logger.debug(f"Loaded runtime cache from {target} ({len(data)} bytes)")
 
     def save(self, path: Optional[str] = None) -> None:
-        """Serialize ``self._cache`` and write to disk under a filelock.
+        """Serialize the underlying cache and write to disk under a filelock.
 
-        No-op if path is empty or cache wasn't materialized. Caller must
+        No-op if path is empty or the cache wasn't materialized. Caller must
         ensure no enqueue is concurrently writing (the CM detaches the cache
         from all engines before calling save in ``__exit__``).
         """
         target = path if path is not None else self.path
-        if not target or self._cache is None:
+        if not target:
             return
-        host_mem = self._cache.serialize()
-        if host_mem is None or host_mem.nbytes == 0:
+        data = self._read_bytes()
+        if not data:
             return
         from filelock import FileLock
 
@@ -118,9 +161,21 @@ class RuntimeCacheHandle:
         tmp = target + ".tmp"
         with FileLock(target + ".lock").acquire(timeout=_FILELOCK_TIMEOUT_S):
             with open(tmp, "wb") as f:
-                f.write(memoryview(host_mem))
+                f.write(data)
             shutil.move(tmp, target)
-        logger.debug(f"Saved runtime cache to {target} ({host_mem.nbytes} bytes)")
+        logger.debug(f"Saved runtime cache to {target} ({len(data)} bytes)")
+
+    def __del__(self) -> None:
+        # Best-effort autosave for engine-implicit handles. The CM disables
+        # this (``autosave_on_del=False``) since it saves on ``__exit__``;
+        # user-constructed handles default to disabled so save timing stays
+        # under the user's control. ``__del__`` can fire during interpreter
+        # shutdown when imports/filesystem ops fail unpredictably -- swallow.
+        if self.autosave_on_del and self.path:
+            try:
+                self.save()
+            except Exception:
+                pass
 
     def __eq__(self, other: object) -> bool:
         # Identity equality so passing the same handle twice through
@@ -132,8 +187,9 @@ class RuntimeCacheHandle:
 
     def __repr__(self) -> str:
         return (
-            f"RuntimeCacheHandle(path={self.path!r}, autosave={self.autosave}, "
-            f"materialized={self._cache is not None})"
+            f"RuntimeCacheHandle(path={self.path!r}, "
+            f"autosave_on_del={self.autosave_on_del}, "
+            f"materialized={self._cache is not None or self._torchbind is not None})"
         )
 
 
@@ -190,9 +246,12 @@ class _RuntimeCacheContextManager:
 
         # 2. Materialize the cache via the bootstrap engine's runtime_config.
         # (The cache returned is free-floating; ownership transfers to the handle.)
+        # ``autosave_on_del=False`` because the CM saves explicitly on ``__exit__``;
+        # letting ``__del__`` also save would double-write when ``rc`` falls out
+        # of scope after the with-block.
         cache_obj = bootstrap_engine.runtime_config.create_runtime_cache()
         self.handle = RuntimeCacheHandle(
-            cache=cache_obj, path=self.path, autosave=self.autosave
+            cache=cache_obj, path=self.path, autosave_on_del=False
         )
 
         # 3. Load from disk if path was given.

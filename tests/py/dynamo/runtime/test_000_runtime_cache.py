@@ -202,6 +202,55 @@ class TestRuntimeCacheContextManager(TestCase):
                 with runtime_cache(empty, path):
                     pass
 
+    def test_cm_does_not_double_save_on_rc_gc(self):
+        """CM yields handle with autosave_on_del=False; only one save happens.
+
+        Regression: if the CM-yielded handle had autosave_on_del=True, the
+        handle's __del__ would re-save after the CM's __exit__ already wrote
+        the file. We disable autosave_on_del on CM-created handles to avoid
+        that double-write.
+        """
+        compiled, inputs = _compile_simple()
+        save_calls = []
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "shared.bin")
+            with runtime_cache(compiled, path) as rc:
+                # CM-created handle must not autosave on del (CM saves explicitly).
+                self.assertFalse(rc.autosave_on_del)
+                original_save = rc.save
+
+                def _tracking_save(p=None):
+                    save_calls.append(p)
+                    return original_save(p)
+
+                rc.save = _tracking_save  # type: ignore[method-assign]
+                _ = compiled(*inputs)
+            # CM.__exit__ saves exactly once; rc going out of scope triggers
+            # __del__ but autosave_on_del is False, so no second save.
+            del rc
+            gc.collect()
+            self.assertEqual(len(save_calls), 1, f"Expected one save, got {save_calls}")
+            self.assertTrue(os.path.exists(path))
+
+
+class TestRuntimeCacheHandleAutosave(TestCase):
+    """Whitebox tests for RuntimeCacheHandle.autosave_on_del semantics."""
+
+    def test_user_built_handle_no_autosave_by_default(self):
+        """Hand-built handle defaults to autosave_on_del=False; nothing on GC."""
+        from torch_tensorrt.runtime._runtime_cache import RuntimeCacheHandle
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "rc.bin")
+            handle = RuntimeCacheHandle(path=path)
+            self.assertFalse(handle.autosave_on_del)
+            del handle
+            gc.collect()
+            self.assertFalse(
+                os.path.exists(path),
+                "User-built handle with autosave_on_del=False should not save on GC",
+            )
+
 
 if __name__ == "__main__":
     run_tests()

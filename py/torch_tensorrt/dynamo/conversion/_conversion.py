@@ -8,7 +8,7 @@ import tensorrt as trt
 import torch
 
 if TYPE_CHECKING:
-    from torch_tensorrt.runtime._runtime_settings import RuntimeSettings
+    from torch_tensorrt.runtime._runtime_config import RuntimeSettings
 from torch_tensorrt._enums import dtype
 from torch_tensorrt._features import ENABLED_FEATURES
 from torch_tensorrt._Input import Input

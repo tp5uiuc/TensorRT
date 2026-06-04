@@ -279,19 +279,19 @@ struct TRTEngine : torch::CustomClassHolder {
   void set_resource_allocation_strategy(ResourceAllocationStrategy new_strategy);
   ResourceAllocationStrategy get_resource_allocation_strategy();
 
-  // Live IRuntimeConfig wrapper. Settings are sourced from `runtime_settings_` at
-  // every (re)build. On non-RTX or pre-10.11 TRT this is essentially empty.
+  // Owns the canonical `RuntimeSettings` plus the live `IRuntimeConfig` derived
+  // from them. The engine forwards `runtime_settings()` and
+  // `update_runtime_settings()` here -- there is no separate settings field on
+  // the engine.
   TRTRuntimeConfig runtime_cfg;
 
-  // Current user-facing runtime settings. Initialized from the constructor's
-  // `runtime_settings` param; mutated by `update_runtime_settings`.
-  RuntimeSettings runtime_settings_;
   [[nodiscard]] RuntimeSettings const& runtime_settings() const noexcept {
-    return runtime_settings_;
+    return runtime_cfg.settings();
   }
 
-  // Apply new runtime settings. Fast-paths on equality. On change, rebuilds the
-  // IRuntimeConfig from the new settings and recreates the execution context.
+  // Apply new runtime settings. Fast-paths on equality (via
+  // `TRTRuntimeConfig::set_settings`). On change, rebuilds the
+  // `IRuntimeConfig` from the new settings and recreates the execution context.
   void update_runtime_settings(RuntimeSettings new_settings);
 
   // Whether the engine has any input binding with a dynamic dimension. Computed
