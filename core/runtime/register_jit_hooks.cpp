@@ -17,63 +17,17 @@ namespace {
 
 // Register `RuntimeCacheHandle` as a torchbind class so Python can pass the same
 // underlying `IRuntimeCache` to both Python and C++ engine backends. File I/O on
-// the handle is the Python side's responsibility; the C++ class only holds the
-// shared_ptr and an informational path string.
+// the handle is the Python side's responsibility; the C++ struct only holds the
+// shared_ptr and an informational path string. The method bodies (and the
+// `#ifdef TRT_MAJOR_RTX` they entail) live in RuntimeSettings.cpp -- this file
+// is registration-only.
 static auto TORCHTRT_UNUSED RuntimeCacheHandleRegistration =
     torch::class_<RuntimeCacheHandle>("tensorrt", "RuntimeCacheHandle")
         .def(torch::init<std::string>())
-        .def("path", &RuntimeCacheHandle::path)
-        .def("set_path", &RuntimeCacheHandle::set_path)
-        // Expose the underlying IRuntimeCache bytes to Python so the Python-
-        // side save/load logic can persist them under filelock. Returns an
-        // empty uint8 tensor if the cache hasn't been materialized yet.
-        //
-        // We return ``at::Tensor`` rather than ``std::string`` because TorchBind
-        // forces ``std::string`` to round-trip through Python ``str`` (UTF-8)
-        // and serialized cache bytes are not valid UTF-8.
-        .def(
-            "serialize",
-            [](const c10::intrusive_ptr<RuntimeCacheHandle>& self) -> at::Tensor {
-#ifdef TRT_MAJOR_RTX
-              auto opts = at::TensorOptions().dtype(at::kByte);
-              if (!self->cache) {
-                return at::empty({0}, opts);
-              }
-              auto host_mem = make_trt(self->cache->serialize());
-              if (!host_mem) {
-                return at::empty({0}, opts);
-              }
-              auto tensor = at::empty({static_cast<int64_t>(host_mem->size())}, opts);
-              std::memcpy(tensor.data_ptr(), host_mem->data(), host_mem->size());
-              return tensor;
-#else
-              return at::empty({0}, at::TensorOptions().dtype(at::kByte));
-#endif
-            })
-        // Deserialize bytes loaded from disk into the underlying IRuntimeCache.
-        // Expects a uint8 ``at::Tensor``. No-op for empty input or if the
-        // IRuntimeCache hasn't been materialized yet.
-        .def(
-            "deserialize",
-            [](const c10::intrusive_ptr<RuntimeCacheHandle>& self, at::Tensor data) -> void {
-#ifdef TRT_MAJOR_RTX
-              if (data.numel() == 0 || !self->cache) {
-                return;
-              }
-              auto contig = data.contiguous().to(at::kCPU);
-              self->cache->deserialize(contig.data_ptr(), static_cast<size_t>(contig.numel()));
-#else
-              (void)data;
-#endif
-            })
-        // True iff an engine has populated the underlying IRuntimeCache.
-        .def("has_cache", [](const c10::intrusive_ptr<RuntimeCacheHandle>& self) -> bool {
-#ifdef TRT_MAJOR_RTX
-          return self->cache != nullptr;
-#else
-          return false;
-#endif
-        });
+        .def_readwrite("path", &RuntimeCacheHandle::path)
+        .def("serialize", &RuntimeCacheHandle::serialize)
+        .def("deserialize", &RuntimeCacheHandle::deserialize)
+        .def("has_cache", &RuntimeCacheHandle::has_cache);
 
 // TODO: Implement a call method
 // c10::List<at::Tensor> TRTEngine::Run(c10::List<at::Tensor> inputs) {
