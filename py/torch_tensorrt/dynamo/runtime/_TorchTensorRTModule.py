@@ -311,11 +311,20 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
         rs_for_dispatch, needs_load = self._materialize_cpp_implicit_handle(rs)
 
         from torch_tensorrt.runtime._runtime_cache import _to_torchbind_handle
+        from torch_tensorrt.runtime._runtime_config import (
+            _CUDA_GRAPH_STRATEGY_MAP,
+            _DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP,
+        )
 
         cache_arg = _to_torchbind_handle(rs_for_dispatch.runtime_cache)
+        # Cross the boundary as ints: the C++ ``RuntimeSettings`` stores the
+        # strategies as ``int32_t`` mirrors of the nvinfer1 enum values.
+        # Strings are validated up-stream at ``RuntimeSettings.__post_init__``.
         self.engine.update_runtime_settings(
-            rs_for_dispatch.dynamic_shapes_kernel_specialization_strategy,
-            rs_for_dispatch.cuda_graph_strategy,
+            _DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP[
+                rs_for_dispatch.dynamic_shapes_kernel_specialization_strategy
+            ],
+            _CUDA_GRAPH_STRATEGY_MAP[rs_for_dispatch.cuda_graph_strategy],
             cache_arg,
         )
         # The C++ engine's `update_runtime_settings` materializes the

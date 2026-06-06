@@ -1,5 +1,6 @@
 #include "core/runtime/RuntimeSettings.h"
 
+#include <array>
 #include <cstring>
 #include <sstream>
 #include <tuple>
@@ -9,6 +10,30 @@
 namespace torch_tensorrt {
 namespace core {
 namespace runtime {
+
+namespace {
+
+// Reverse-lookup tables for ``int32_t`` strategy values. The indices match the
+// nvinfer1 enum integers (validated at the Python boundary; no further check
+// here). Out-of-range -> "<unknown>".
+constexpr std::array<char const*, 3> kDsStrategyNames = {"lazy", "eager", "none"};
+constexpr std::array<char const*, 2> kCgStrategyNames = {"disabled", "whole_graph_capture"};
+
+} // namespace
+
+std::string ds_strategy_name(int32_t v) {
+  if (v < 0 || static_cast<size_t>(v) >= kDsStrategyNames.size()) {
+    return "<unknown>";
+  }
+  return kDsStrategyNames[static_cast<size_t>(v)];
+}
+
+std::string cg_strategy_name(int32_t v) {
+  if (v < 0 || static_cast<size_t>(v) >= kCgStrategyNames.size()) {
+    return "<unknown>";
+  }
+  return kCgStrategyNames[static_cast<size_t>(v)];
+}
 
 // ---- RuntimeCacheHandle methods ---------------------------------------------
 //
@@ -68,8 +93,9 @@ bool RuntimeSettings::operator==(RuntimeSettings const& other) const noexcept {
 
 std::string RuntimeSettings::to_str() const {
   std::ostringstream os;
-  os << "Dynamic Shapes Kernel Strategy: " << dynamic_shapes_kernel_specialization_strategy << std::endl;
-  os << "CUDA Graph Strategy: " << cuda_graph_strategy << std::endl;
+  os << "Dynamic Shapes Kernel Strategy: " << ds_strategy_name(dynamic_shapes_kernel_specialization_strategy)
+     << std::endl;
+  os << "CUDA Graph Strategy: " << cg_strategy_name(cuda_graph_strategy) << std::endl;
   if (runtime_cache) {
     auto const& p = runtime_cache->path;
     os << "Runtime Cache: " << (p.empty() ? "<in-memory shared>" : p) << std::endl;

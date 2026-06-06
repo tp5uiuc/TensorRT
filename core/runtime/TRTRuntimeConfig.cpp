@@ -11,36 +11,6 @@ namespace torch_tensorrt {
 namespace core {
 namespace runtime {
 
-namespace {
-
-#ifdef TRT_MAJOR_RTX
-[[nodiscard]] nvinfer1::DynamicShapesKernelSpecializationStrategy to_trt_ds_strategy(std::string const& s) {
-  if (s == "lazy") {
-    return nvinfer1::DynamicShapesKernelSpecializationStrategy::kLAZY;
-  }
-  if (s == "eager") {
-    return nvinfer1::DynamicShapesKernelSpecializationStrategy::kEAGER;
-  }
-  if (s == "none") {
-    return nvinfer1::DynamicShapesKernelSpecializationStrategy::kNONE;
-  }
-  TORCHTRT_CHECK(
-      false, "Invalid dynamic_shapes_kernel_specialization_strategy: \"" << s << "\" (expected lazy | eager | none)");
-}
-
-[[nodiscard]] nvinfer1::CudaGraphStrategy to_trt_cg_strategy(std::string const& s) {
-  if (s == "disabled") {
-    return nvinfer1::CudaGraphStrategy::kDISABLED;
-  }
-  if (s == "whole_graph_capture") {
-    return nvinfer1::CudaGraphStrategy::kWHOLE_GRAPH_CAPTURE;
-  }
-  TORCHTRT_CHECK(false, "Invalid cuda_graph_strategy: \"" << s << "\" (expected disabled | whole_graph_capture)");
-}
-#endif
-
-} // namespace
-
 bool TRTRuntimeConfig::set_settings(RuntimeSettings new_settings) {
   if (new_settings == settings_) {
     return false;
@@ -81,13 +51,15 @@ void TRTRuntimeConfig::ensure_initialized(TORCHTRT_UNUSED nvinfer1::ICudaEngine*
     LOG_DEBUG("Runtime cache disabled (no RuntimeCacheHandle provided).");
   }
 
-  config->setDynamicShapesKernelSpecializationStrategy(
-      to_trt_ds_strategy(settings_.dynamic_shapes_kernel_specialization_strategy));
+  // The int32_t fields are ABI-compatible with the nvinfer1 enums: validated
+  // at the Python boundary, so a plain ``static_cast`` is enough here.
+  config->setDynamicShapesKernelSpecializationStrategy(static_cast<nvinfer1::DynamicShapesKernelSpecializationStrategy>(
+      settings_.dynamic_shapes_kernel_specialization_strategy));
   LOG_DEBUG(
       "Dynamic shapes kernel specialization strategy set to "
-      << settings_.dynamic_shapes_kernel_specialization_strategy);
+      << ds_strategy_name(settings_.dynamic_shapes_kernel_specialization_strategy));
 
-  if (!config->setCudaGraphStrategy(to_trt_cg_strategy(settings_.cuda_graph_strategy))) {
+  if (!config->setCudaGraphStrategy(static_cast<nvinfer1::CudaGraphStrategy>(settings_.cuda_graph_strategy))) {
     LOG_WARNING("Failed to set CUDA graph strategy; continuing with default.");
   }
 #endif
@@ -118,7 +90,9 @@ bool TRTRuntimeConfig::uses_internal_capture(TORCHTRT_UNUSED bool cudagraphs_ena
   // On TRT-RTX the internal runtime handles capture/replay whenever a non-disabled
   // strategy is set, or when subgraph cudagraphs are enabled globally. In both
   // cases the caller should skip its manual at::cuda::CUDAGraph wrapper.
-  return settings_.cuda_graph_strategy != "disabled" || cudagraphs_enabled;
+  // ``kDISABLED == 0`` in nvinfer1::CudaGraphStrategy; the struct mirrors that.
+  return settings_.cuda_graph_strategy != static_cast<int32_t>(nvinfer1::CudaGraphStrategy::kDISABLED) ||
+      cudagraphs_enabled;
 #else
   return false;
 #endif
@@ -136,7 +110,10 @@ bool TRTRuntimeConfig::is_monolithic_capturable(
   // "lazy" kernel specialization only swaps specialized kernels mid-run when an
   // input has a dynamic dimension; for static-shape engines the kernels are fixed
   // at setup and the captured graph stays valid. Mirrors the Python check.
-  return !(settings_.dynamic_shapes_kernel_specialization_strategy == "lazy" && has_dynamic_inputs);
+  return !(
+      settings_.dynamic_shapes_kernel_specialization_strategy ==
+          static_cast<int32_t>(nvinfer1::DynamicShapesKernelSpecializationStrategy::kLAZY) &&
+      has_dynamic_inputs);
 #else
   return true;
 #endif

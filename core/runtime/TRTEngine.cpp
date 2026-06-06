@@ -691,14 +691,15 @@ bool TRTEngine::is_monolithic_capturable(cudaStream_t stream) const {
 
 void TRTEngine::disable_rtx_native_cudagraphs() {
 #ifdef TRT_MAJOR_RTX
-  if (runtime_cfg.settings().cuda_graph_strategy == "disabled") {
+  constexpr int32_t kDisabled = static_cast<int32_t>(nvinfer1::CudaGraphStrategy::kDISABLED);
+  if (runtime_cfg.settings().cuda_graph_strategy == kDisabled) {
     return;
   }
   LOG_WARNING(
       "Outer CUDA stream capture detected; disabling TensorRT-RTX native CUDA graph strategy on engine "
       << name << " for the remainder of its lifetime.");
   RuntimeSettings new_settings = runtime_cfg.settings();
-  new_settings.cuda_graph_strategy = "disabled";
+  new_settings.cuda_graph_strategy = kDisabled;
   update_runtime_settings(std::move(new_settings));
 #endif
 }

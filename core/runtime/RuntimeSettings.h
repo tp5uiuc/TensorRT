@@ -57,9 +57,22 @@ struct RuntimeCacheHandle : public torch::CustomClassHolder {
 // flatten it into positional args at the torchbind boundary -- TorchBind can't
 // carry a dataclass natively. Equality is value-by-value; the cache field
 // compares by pointer identity (same handle -> same cache).
+//
+// The strategy fields are ``int32_t`` rather than strings: the Python user-
+// facing API takes strings (``"lazy" | "eager" | "none"`` etc.) and validates
+// them at the Python boundary, then converts to ints before crossing into
+// C++. On the C++ side the ints are ABI-compatible with the corresponding
+// ``nvinfer1::DynamicShapesKernelSpecializationStrategy`` /
+// ``nvinfer1::CudaGraphStrategy`` enum values, so applying them is just a
+// ``static_cast`` (see ``TRTRuntimeConfig::ensure_initialized``). For
+// human-readable logging use ``ds_strategy_name`` / ``cg_strategy_name``.
 struct RuntimeSettings {
-  std::string dynamic_shapes_kernel_specialization_strategy = "lazy";
-  std::string cuda_graph_strategy = "disabled";
+  // Mirror of nvinfer1::DynamicShapesKernelSpecializationStrategy on RTX.
+  // 0 = lazy (default), 1 = eager, 2 = none.
+  int32_t dynamic_shapes_kernel_specialization_strategy = 0;
+  // Mirror of nvinfer1::CudaGraphStrategy on RTX.
+  // 0 = disabled (default), 1 = whole_graph_capture.
+  int32_t cuda_graph_strategy = 0;
   c10::intrusive_ptr<RuntimeCacheHandle> runtime_cache = nullptr;
 
   bool operator==(RuntimeSettings const& other) const noexcept;
@@ -69,6 +82,12 @@ struct RuntimeSettings {
 
   [[nodiscard]] std::string to_str() const;
 };
+
+// Reverse-lookup helpers used by ``to_str`` and ``operator<<``. Out-of-range
+// values render as ``"<unknown>"``. Defined here so other translation units
+// (e.g. ``TRTEngine.cpp`` for ``LOG_DEBUG``) can use the same mapping.
+[[nodiscard]] std::string ds_strategy_name(int32_t v);
+[[nodiscard]] std::string cg_strategy_name(int32_t v);
 
 std::ostream& operator<<(std::ostream& os, RuntimeSettings const& rs);
 

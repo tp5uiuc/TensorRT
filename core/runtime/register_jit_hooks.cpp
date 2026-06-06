@@ -67,14 +67,19 @@ static auto TORCHTRT_UNUSED TRTEngineTSRegistrtion =
         .def(
             "update_runtime_settings",
             [](const c10::intrusive_ptr<TRTEngine>& self,
-               std::string const& dynamic_shapes_kernel_specialization_strategy,
-               std::string const& cuda_graph_strategy,
+               int64_t dynamic_shapes_kernel_specialization_strategy,
+               int64_t cuda_graph_strategy,
                c10::optional<c10::intrusive_ptr<RuntimeCacheHandle>> runtime_cache) -> void {
-              // `c10::optional` lets TorchBind accept Python `None` here. We
-              // translate to a (possibly null) intrusive_ptr inside the struct.
+              // Strategies cross the Py->C++ boundary as ints (TorchBind uses
+              // ``int64_t``; the struct stores ``int32_t`` mirroring the
+              // nvinfer1 enum values). Validation happens at the Python
+              // boundary in ``RuntimeSettings.__post_init__``.
+              // ``c10::optional`` lets TorchBind accept Python ``None`` for
+              // the cache; translate to a (possibly null) intrusive_ptr.
               RuntimeSettings rs;
-              rs.dynamic_shapes_kernel_specialization_strategy = dynamic_shapes_kernel_specialization_strategy;
-              rs.cuda_graph_strategy = cuda_graph_strategy;
+              rs.dynamic_shapes_kernel_specialization_strategy =
+                  static_cast<int32_t>(dynamic_shapes_kernel_specialization_strategy);
+              rs.cuda_graph_strategy = static_cast<int32_t>(cuda_graph_strategy);
               rs.runtime_cache = runtime_cache.has_value() ? std::move(*runtime_cache) : nullptr;
               self->update_runtime_settings(std::move(rs));
             })
