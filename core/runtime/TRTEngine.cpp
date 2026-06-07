@@ -691,22 +691,21 @@ bool TRTEngine::is_monolithic_capturable(cudaStream_t stream) const {
 
 void TRTEngine::disable_rtx_native_cudagraphs() {
 #ifdef TRT_MAJOR_RTX
-  constexpr int32_t kDisabled = static_cast<int32_t>(nvinfer1::CudaGraphStrategy::kDISABLED);
-  if (runtime_cfg.settings().cuda_graph_strategy == kDisabled) {
+  if (runtime_cfg.settings().cuda_graph_strategy == CudaGraphStrategy::kDISABLED) {
     return;
   }
   LOG_WARNING(
       "Outer CUDA stream capture detected; disabling TensorRT-RTX native CUDA graph strategy on engine "
       << name << " for the remainder of its lifetime.");
   RuntimeSettings new_settings = runtime_cfg.settings();
-  new_settings.cuda_graph_strategy = kDisabled;
-  update_runtime_settings(std::move(new_settings));
+  new_settings.cuda_graph_strategy = CudaGraphStrategy::kDISABLED;
+  (void)runtime_settings(std::move(new_settings));
 #endif
 }
 
-void TRTEngine::update_runtime_settings(RuntimeSettings new_settings) {
-  if (!runtime_cfg.set_settings(std::move(new_settings))) {
-    return;
+bool TRTEngine::runtime_settings(RuntimeSettings new_settings) {
+  if (!runtime_cfg.settings(std::move(new_settings))) {
+    return false;
   }
   // Lazy: drop the live context, but do NOT eagerly recreate. The next user
   // (typically the next ``execute_engine`` call) will lazy-create with the
@@ -718,6 +717,7 @@ void TRTEngine::update_runtime_settings(RuntimeSettings new_settings) {
   // re-record; do the same here so a settings flip inside an active CM forces
   // the next enqueue to re-record any captured graph.
   runtime_states.context_changed = true;
+  return true;
 }
 
 void TRTEngine::ensure_execution_context() {

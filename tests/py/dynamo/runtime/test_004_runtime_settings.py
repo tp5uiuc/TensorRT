@@ -274,7 +274,7 @@ class TestLazyExecutionContextCreation(TestCase):
 
         new_rs = RuntimeSettings(cuda_graph_strategy="whole_graph_capture")
         for mod in ttrt_modules:
-            mod.set_runtime_settings(new_rs)
+            mod.runtime_settings = new_rs
             # set itself does not eagerly recreate on the cpp path.
             if not use_python_runtime:
                 self.assertEqual(mod.engine.num_execution_contexts_created(), 1)
@@ -303,7 +303,7 @@ class TestLazyExecutionContextCreation(TestCase):
         baseline = [mod.engine.num_execution_contexts_created() for mod in ttrt_modules]
 
         for mod in ttrt_modules:
-            mod.set_runtime_settings(rs)  # identical to existing
+            mod.runtime_settings = rs  # identical to existing
         _ = compiled(*inputs)
         for mod, prior in zip(ttrt_modules, baseline):
             self.assertEqual(mod.engine.num_execution_contexts_created(), prior)

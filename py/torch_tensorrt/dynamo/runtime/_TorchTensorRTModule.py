@@ -274,25 +274,26 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
 
     @property
     def runtime_settings(self) -> RuntimeSettings:
-        """The current ``RuntimeSettings`` on this module (and its engine).
+        """The current ``RuntimeSettings`` on this module's engine.
 
         This is the snapshot the ``runtime_config`` CM reads at ``__enter__``
         and restores at ``__exit__``.
         """
         return self._runtime_settings
 
-    def set_runtime_settings(self, rs: RuntimeSettings) -> None:
-        """Apply ``RuntimeSettings`` to all TRT engines under this module.
+    @runtime_settings.setter
+    def runtime_settings(self, rs: RuntimeSettings) -> None:
+        """Apply ``RuntimeSettings`` to this engine.
 
-        Walks ``named_modules()`` so calling on a wrapper / parent
-        ``nn.Module`` propagates to every contained
-        ``TorchTensorRTModule``. Dispatches to the Python ``TRTEngine`` or
-        the C++ ``torch.classes.tensorrt.Engine`` per submodule's backend.
+        Operates on ``self`` only -- callers walking an outer
+        ``nn.Module`` should iterate ``named_modules()`` and assign per
+        ``TorchTensorRTModule``.
         """
-        for _, mod in self.named_modules():
-            if isinstance(mod, TorchTensorRTModule) and mod.engine is not None:
-                mod._dispatch_runtime_settings_to_engine(rs)
-                mod._runtime_settings = rs
+        if self.engine is None:
+            self._runtime_settings = rs
+            return
+        self._dispatch_runtime_settings_to_engine(rs)
+        self._runtime_settings = rs
 
     def _dispatch_runtime_settings_to_engine(self, rs: RuntimeSettings) -> None:
         """Backend-aware dispatch of ``update_runtime_settings(rs)`` to ``self.engine``."""
@@ -530,7 +531,7 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
                 or not ENABLED_FEATURES.torch_tensorrt_runtime
             )
             # RuntimeSettings are NOT serialized; restore defaults. Caller can
-            # reapply via ``compiled.set_runtime_settings(...)`` or a CM after load.
+            # reapply via ``mod.runtime_settings = ...`` (per submodule) or a CM after load.
             self._runtime_settings = RuntimeSettings()
             if self._use_python_runtime:
                 from torch_tensorrt.dynamo.runtime._TRTEngine import TRTEngine

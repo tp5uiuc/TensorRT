@@ -4,6 +4,7 @@
 #include <cstring>
 #include <sstream>
 #include <tuple>
+#include <type_traits>
 
 #include "core/util/prelude.h"
 
@@ -13,26 +14,42 @@ namespace runtime {
 
 namespace {
 
-// Reverse-lookup tables for ``int32_t`` strategy values. The indices match the
-// nvinfer1 enum integers (validated at the Python boundary; no further check
-// here). Out-of-range -> "<unknown>".
-constexpr std::array<char const*, 3> kDsStrategyNames = {"lazy", "eager", "none"};
-constexpr std::array<char const*, 2> kCgStrategyNames = {"disabled", "whole_graph_capture"};
+// Reverse-lookup tables. Indices match the enum integer values (which mirror
+// the nvinfer1 enums). Out-of-range -> "<unknown>".
+constexpr std::array<std::string_view, 3> kDsStrategyNames = {"lazy", "eager", "none"};
+constexpr std::array<std::string_view, 2> kCgStrategyNames = {"disabled", "whole_graph_capture"};
 
 } // namespace
 
-std::string ds_strategy_name(int32_t v) {
-  if (v < 0 || static_cast<size_t>(v) >= kDsStrategyNames.size()) {
-    return "<unknown>";
-  }
-  return kDsStrategyNames[static_cast<size_t>(v)];
+DynamicShapesKernelSpecializationStrategy to_dynamic_shapes_kernel_strategy(int32_t v) {
+  TORCHTRT_CHECK(
+      v >= 0 && static_cast<size_t>(v) < kDsStrategyNames.size(),
+      "Invalid dynamic_shapes_kernel_specialization_strategy int: " << v
+                                                                    << " (expected 0..2 mapping to lazy|eager|none)");
+  return static_cast<DynamicShapesKernelSpecializationStrategy>(v);
 }
 
-std::string cg_strategy_name(int32_t v) {
-  if (v < 0 || static_cast<size_t>(v) >= kCgStrategyNames.size()) {
+CudaGraphStrategy to_cuda_graph_strategy(int32_t v) {
+  TORCHTRT_CHECK(
+      v >= 0 && static_cast<size_t>(v) < kCgStrategyNames.size(),
+      "Invalid cuda_graph_strategy int: " << v << " (expected 0..1 mapping to disabled|whole_graph_capture)");
+  return static_cast<CudaGraphStrategy>(v);
+}
+
+std::string_view ds_strategy_name(DynamicShapesKernelSpecializationStrategy v) {
+  auto const i = static_cast<std::underlying_type_t<decltype(v)>>(v);
+  if (i < 0 || static_cast<size_t>(i) >= kDsStrategyNames.size()) {
     return "<unknown>";
   }
-  return kCgStrategyNames[static_cast<size_t>(v)];
+  return kDsStrategyNames[static_cast<size_t>(i)];
+}
+
+std::string_view cg_strategy_name(CudaGraphStrategy v) {
+  auto const i = static_cast<std::underlying_type_t<decltype(v)>>(v);
+  if (i < 0 || static_cast<size_t>(i) >= kCgStrategyNames.size()) {
+    return "<unknown>";
+  }
+  return kCgStrategyNames[static_cast<size_t>(i)];
 }
 
 // ---- RuntimeCacheHandle methods ---------------------------------------------
@@ -44,36 +61,37 @@ std::string cg_strategy_name(int32_t v) {
 // references with zero conditional compilation.
 
 at::Tensor RuntimeCacheHandle::serialize() const {
-  auto opts = at::TensorOptions().dtype(at::kByte);
+  auto const opts = at::TensorOptions().dtype(at::kByte);
+  auto const empty = [&]() { return at::empty({0}, opts); };
 #ifdef TRT_MAJOR_RTX
-  if (!cache) {
-    return at::empty({0}, opts);
+  if (!trt_handle) {
+    return empty();
   }
-  auto host_mem = make_trt(cache->serialize());
+  auto host_mem = make_trt(trt_handle->serialize());
   if (!host_mem) {
-    return at::empty({0}, opts);
+    return empty();
   }
   auto tensor = at::empty({static_cast<int64_t>(host_mem->size())}, opts);
   std::memcpy(tensor.data_ptr(), host_mem->data(), host_mem->size());
   return tensor;
 #else
-  return at::empty({0}, opts);
+  return empty();
 #endif
 }
 
 void RuntimeCacheHandle::deserialize(TORCHTRT_UNUSED at::Tensor data) {
 #ifdef TRT_MAJOR_RTX
-  if (data.numel() == 0 || !cache) {
+  if (data.numel() == 0 || !trt_handle) {
     return;
   }
   auto contig = data.contiguous().to(at::kCPU);
-  cache->deserialize(contig.data_ptr(), static_cast<size_t>(contig.numel()));
+  trt_handle->deserialize(contig.data_ptr(), static_cast<size_t>(contig.numel()));
 #endif
 }
 
 bool RuntimeCacheHandle::has_cache() const {
 #ifdef TRT_MAJOR_RTX
-  return cache != nullptr;
+  return trt_handle != nullptr;
 #else
   return false;
 #endif
@@ -83,8 +101,8 @@ bool RuntimeCacheHandle::has_cache() const {
 
 bool RuntimeSettings::operator==(RuntimeSettings const& other) const noexcept {
   // ``runtime_cache`` compares by pointer identity: passing the same handle
-  // twice through ``update_runtime_settings`` is a no-op. Hoisted into locals
-  // because ``std::tie`` requires lvalues.
+  // twice through the settings setter is a no-op. Hoisted into locals because
+  // ``std::tie`` requires lvalues.
   auto* this_cache = runtime_cache.get();
   auto* other_cache = other.runtime_cache.get();
   return std::tie(dynamic_shapes_kernel_specialization_strategy, cuda_graph_strategy, this_cache) ==
@@ -93,15 +111,17 @@ bool RuntimeSettings::operator==(RuntimeSettings const& other) const noexcept {
 
 std::string RuntimeSettings::to_str() const {
   std::ostringstream os;
-  os << "Dynamic Shapes Kernel Strategy: " << ds_strategy_name(dynamic_shapes_kernel_specialization_strategy)
+  os << "RuntimeSettings{" << std::endl;
+  os << "  Dynamic Shapes Kernel Strategy: " << ds_strategy_name(dynamic_shapes_kernel_specialization_strategy)
      << std::endl;
-  os << "CUDA Graph Strategy: " << cg_strategy_name(cuda_graph_strategy) << std::endl;
+  os << "  CUDA Graph Strategy: " << cg_strategy_name(cuda_graph_strategy) << std::endl;
   if (runtime_cache) {
     auto const& p = runtime_cache->path;
-    os << "Runtime Cache: " << (p.empty() ? "<in-memory shared>" : p) << std::endl;
+    os << "  Runtime Cache: " << (p.empty() ? "<in-memory shared>" : p) << std::endl;
   } else {
-    os << "Runtime Cache: <engine-local, in-memory>" << std::endl;
+    os << "  Runtime Cache: <engine-local, in-memory>" << std::endl;
   }
+  os << "}";
   return os.str();
 }
 

@@ -25,7 +25,7 @@ Three ways to use ``RuntimeSettings``:
        )
 
 2. **Runtime context manager** -- toggle settings inside a ``with`` block.
-3. **Programmatic** -- call ``module.set_runtime_settings(rs)`` directly.
+3. **Programmatic** -- assign ``module.runtime_settings = rs`` directly.
 
 ``RuntimeSettings`` is intentionally NOT part of ``CompilationSettings`` and is
 NOT serialized into the engine tuple (per GitHub pytorch/TensorRT#4310). It's
@@ -339,7 +339,7 @@ class _RuntimeConfigContextManager:
     """Pool CM that applies ``RuntimeSettings`` overrides to every TRT submodule.
 
     Walks ``named_modules()`` once on enter, snapshots prior settings per
-    engine, calls ``mod.set_runtime_settings(merged)`` per engine. Restores on
+    engine, sets ``mod.runtime_settings = merged`` per engine. Restores on
     exit using the same snapshot dict.
 
     Yields the target (or tuple of targets) so users can write
@@ -387,12 +387,12 @@ class _RuntimeConfigContextManager:
                         continue
                     self._saved[mod] = current
                     merged = current.merge(**self._overrides)
-                    mod.set_runtime_settings(merged)
+                    mod.runtime_settings = merged
         return self._targets if self._yield_tuple else self._targets[0]
 
     def __exit__(self, *args: Any) -> None:
         for mod, prior in self._saved.items():
-            mod.set_runtime_settings(prior)
+            mod.runtime_settings = prior
 
 
 def runtime_config(

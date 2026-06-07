@@ -289,14 +289,16 @@ struct TRTEngine : torch::CustomClassHolder {
     return runtime_cfg.settings();
   }
 
-  // Apply new runtime settings. Fast-paths on equality (via
-  // `TRTRuntimeConfig::set_settings`). On change, rebuilds the
-  // `IRuntimeConfig` from the new settings and recreates the execution context.
-  void update_runtime_settings(RuntimeSettings new_settings);
+  // Setter overload (matches the getter name). Returns true iff the settings
+  // actually changed -- consumers can read the diff result to decide whether
+  // to invalidate dependent state. On change, invalidates the live
+  // ``IRuntimeConfig`` (the next ``ensure_execution_context`` rebuilds with
+  // the new settings).
+  [[nodiscard]] bool runtime_settings(RuntimeSettings new_settings);
 
   // Whether the engine has any input binding with a dynamic dimension. Computed
   // once during construction; used by `is_monolithic_capturable`.
-  bool has_dynamic_inputs = true;
+  bool has_dynamic_inputs = false;
 
   // Monolithic-capturability check used when this engine is wrapped by an outer whole-graph
   // capture (e.g. CudaGraphsTorchTensorRTModule). Non-RTX builds always return true.
@@ -320,10 +322,10 @@ struct TRTEngine : torch::CustomClassHolder {
 
   // Test/observability hook: increments once every time ``runtime_cfg.create_execution_context``
   // is invoked (i.e. an actual TRT createExecutionContext call, which on RTX
-  // also JIT-compiles the specialized kernel set). Bound on the torchbind class.
-  // ``noexcept`` is intentionally omitted -- torchbind's ``def`` template is
-  // not specialized for ``const noexcept`` member functions.
-  [[nodiscard]] int64_t num_execution_contexts_created() const {
+  // also JIT-compiles the specialized kernel set). Bound on the torchbind class
+  // via a lambda wrapper -- torchbind's ``def`` template is not specialized for
+  // ``const noexcept`` member functions, so this method is registered indirectly.
+  [[nodiscard]] int64_t num_execution_contexts_created() const noexcept {
     return num_execution_contexts_created_;
   }
 

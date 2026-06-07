@@ -288,7 +288,7 @@ def runtime_cache(
 # ``torch.classes.tensorrt.RuntimeCacheHandle`` as the canonical
 # cross-language handle. The Python class above is the user-facing API;
 # at dispatch time the Python module converts to/from the torchbind class as
-# needed (see ``TorchTensorRTModule.set_runtime_settings``).
+# needed (see ``TorchTensorRTModule.runtime_settings`` setter).
 def _to_torchbind_handle(
     rc: Union[None, str, "RuntimeCacheHandle", Any],
 ) -> Any:

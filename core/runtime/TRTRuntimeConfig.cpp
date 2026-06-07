@@ -11,7 +11,7 @@ namespace torch_tensorrt {
 namespace core {
 namespace runtime {
 
-bool TRTRuntimeConfig::set_settings(RuntimeSettings new_settings) {
+bool TRTRuntimeConfig::settings(RuntimeSettings new_settings) {
   if (new_settings == settings_) {
     return false;
   }
@@ -35,14 +35,14 @@ void TRTRuntimeConfig::ensure_initialized(TORCHTRT_UNUSED nvinfer1::ICudaEngine*
   // RuntimeCacheHandle. The Python TRTEngine side creates an implicit
   // handle from a path string and passes it in via the handle; without
   // an explicit user opt-in we leave the IRuntimeConfig cache-less.
-  if (settings_.runtime_cache) {
-    if (!settings_.runtime_cache->cache) {
-      settings_.runtime_cache->cache = make_trt(config->createRuntimeCache());
+  auto& rt_cache = settings_.runtime_cache;
+  if (rt_cache) {
+    if (!rt_cache->trt_handle) {
+      rt_cache->trt_handle = make_trt(config->createRuntimeCache());
       TORCHTRT_CHECK(
-          settings_.runtime_cache->cache.get() != nullptr,
-          "Failed to create IRuntimeCache for shared RuntimeCacheHandle");
+          rt_cache->trt_handle.get() != nullptr, "Failed to create IRuntimeCache for shared RuntimeCacheHandle");
     }
-    if (config->setRuntimeCache(*settings_.runtime_cache->cache)) {
+    if (config->setRuntimeCache(*rt_cache->trt_handle)) {
       LOG_DEBUG("Attached external IRuntimeCache to IRuntimeConfig.");
     } else {
       LOG_WARNING("Failed to attach IRuntimeCache to IRuntimeConfig; cache will be unused.");
@@ -51,8 +51,8 @@ void TRTRuntimeConfig::ensure_initialized(TORCHTRT_UNUSED nvinfer1::ICudaEngine*
     LOG_DEBUG("Runtime cache disabled (no RuntimeCacheHandle provided).");
   }
 
-  // The int32_t fields are ABI-compatible with the nvinfer1 enums: validated
-  // at the Python boundary, so a plain ``static_cast`` is enough here.
+  // Enum values mirror the nvinfer1 enums byte-for-byte (validated at the
+  // boundary via ``to_*_strategy``); a plain ``static_cast`` is enough.
   config->setDynamicShapesKernelSpecializationStrategy(static_cast<nvinfer1::DynamicShapesKernelSpecializationStrategy>(
       settings_.dynamic_shapes_kernel_specialization_strategy));
   LOG_DEBUG(
@@ -90,9 +90,7 @@ bool TRTRuntimeConfig::uses_internal_capture(TORCHTRT_UNUSED bool cudagraphs_ena
   // On TRT-RTX the internal runtime handles capture/replay whenever a non-disabled
   // strategy is set, or when subgraph cudagraphs are enabled globally. In both
   // cases the caller should skip its manual at::cuda::CUDAGraph wrapper.
-  // ``kDISABLED == 0`` in nvinfer1::CudaGraphStrategy; the struct mirrors that.
-  return settings_.cuda_graph_strategy != static_cast<int32_t>(nvinfer1::CudaGraphStrategy::kDISABLED) ||
-      cudagraphs_enabled;
+  return settings_.cuda_graph_strategy != CudaGraphStrategy::kDISABLED || cudagraphs_enabled;
 #else
   return false;
 #endif
@@ -101,7 +99,7 @@ bool TRTRuntimeConfig::uses_internal_capture(TORCHTRT_UNUSED bool cudagraphs_ena
 bool TRTRuntimeConfig::is_monolithic_capturable(
     TORCHTRT_UNUSED bool has_dynamic_inputs,
     TORCHTRT_UNUSED nvinfer1::IExecutionContext* exec_ctx,
-    TORCHTRT_UNUSED cudaStream_t stream) const noexcept {
+    TORCHTRT_UNUSED cudaStream_t stream) const {
 #ifdef TRT_MAJOR_RTX
   TORCHTRT_ASSERT(exec_ctx != nullptr, "is_monolithic_capturable requires a live IExecutionContext");
   if (!exec_ctx->isStreamCapturable(stream)) {
@@ -111,8 +109,7 @@ bool TRTRuntimeConfig::is_monolithic_capturable(
   // input has a dynamic dimension; for static-shape engines the kernels are fixed
   // at setup and the captured graph stays valid. Mirrors the Python check.
   return !(
-      settings_.dynamic_shapes_kernel_specialization_strategy ==
-          static_cast<int32_t>(nvinfer1::DynamicShapesKernelSpecializationStrategy::kLAZY) &&
+      settings_.dynamic_shapes_kernel_specialization_strategy == DynamicShapesKernelSpecializationStrategy::kLAZY &&
       has_dynamic_inputs);
 #else
   return true;

@@ -26,15 +26,19 @@ struct TRTRuntimeConfig {
   explicit TRTRuntimeConfig(RuntimeSettings settings) : settings_(std::move(settings)) {}
 
   // Canonical user-facing runtime settings for this engine. Mutated only via
-  // `set_settings` so the live `IRuntimeConfig` stays in sync.
+  // the `settings(RuntimeSettings)` overload below so the live `IRuntimeConfig`
+  // stays in sync.
   [[nodiscard]] RuntimeSettings const& settings() const noexcept {
     return settings_;
   }
 
-  // Returns true iff `new_settings` differs from the current settings (i.e.
-  // the caller should recreate the `IExecutionContext`). On change the live
-  // `IRuntimeConfig` is invalidated; the next `ensure_initialized` rebuilds.
-  bool set_settings(RuntimeSettings new_settings);
+  // Setter overload (matches the getter's name). Returns true iff
+  // `new_settings` differs from the current settings (i.e. the caller should
+  // recreate the `IExecutionContext`). On change the live `IRuntimeConfig` is
+  // invalidated; the next `ensure_initialized` rebuilds. The `[[nodiscard]]`
+  // attribute ensures callers check the diff result so they don't miss the
+  // invalidation signal.
+  [[nodiscard]] bool settings(RuntimeSettings new_settings);
 
   // (Re)build the `IRuntimeConfig` from `settings_`. Idempotent if the previous
   // build was against identical settings.
@@ -57,11 +61,13 @@ struct TRTRuntimeConfig {
   [[nodiscard]] bool uses_internal_capture(bool cudagraphs_enabled) const noexcept;
 
   // Returns true iff the execution context can be safely included in an outer
-  // monolithic capture. Non-RTX builds always return true.
+  // monolithic capture. Non-RTX builds always return true. Not noexcept: the
+  // RTX path asserts ``exec_ctx != nullptr`` via ``TORCHTRT_ASSERT`` which can
+  // throw on assertion failure.
   [[nodiscard]] bool is_monolithic_capturable(
       bool has_dynamic_inputs,
       nvinfer1::IExecutionContext* exec_ctx,
-      cudaStream_t stream) const noexcept;
+      cudaStream_t stream) const;
 
 #ifdef TRT_HAS_IRUNTIME_CONFIG
   // Lazy-constructed live config. `nullptr` until first `ensure_initialized`.

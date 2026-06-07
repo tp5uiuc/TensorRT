@@ -184,16 +184,17 @@ class TestRuntimeCachePersistence(TestCase):
             self.assertFalse(os.path.exists(path_a))
 
             # Walk to the inner TorchTensorRTModule(s) and swap the cache path
-            # directly -- the outer GraphModule doesn't carry `set_runtime_settings`,
-            # and we want a *permanent* swap (the runtime_config CM restores on
-            # exit, which would mask the save-on-swap signal we're after). The
-            # walk is wrapped in a helper so the loop variable doesn't outlive
-            # the call and keep the inner module alive past ``del compiled``.
+            # directly -- the outer GraphModule doesn't carry the
+            # ``runtime_settings`` property, and we want a *permanent* swap
+            # (the runtime_config CM restores on exit, which would mask the
+            # save-on-swap signal we're after). The walk is wrapped in a
+            # helper so the loop variable doesn't outlive the call and keep
+            # the inner module alive past ``del compiled``.
             def _swap_all(target: torch.nn.Module, new_rs: RuntimeSettings) -> int:
                 count = 0
                 for _, mod in target.named_modules():
                     if isinstance(mod, TorchTensorRTModule):
-                        mod.set_runtime_settings(new_rs)
+                        mod.runtime_settings = new_rs
                         count += 1
                 return count
 

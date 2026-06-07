@@ -56,7 +56,13 @@ static auto TORCHTRT_UNUSED TRTEngineTSRegistrtion =
         .def("reset_captured_graph", &TRTEngine::reset_captured_graph)
         .def("set_output_tensors_as_unowned", &TRTEngine::set_output_tensors_as_unowned)
         .def("are_output_tensors_unowned", &TRTEngine::are_output_tensors_unowned)
-        .def("num_execution_contexts_created", &TRTEngine::num_execution_contexts_created)
+        // Lambda wrapper because torchbind's ``def`` template lacks a
+        // ``const noexcept`` member-function specialization; routing through a
+        // plain function pointer would force us to drop the ``noexcept`` on
+        // ``num_execution_contexts_created`` itself.
+        .def(
+            "num_execution_contexts_created",
+            [](const c10::intrusive_ptr<TRTEngine>& self) -> int64_t { return self->num_execution_contexts_created(); })
         .def(
             "use_dynamically_allocated_resources",
             [](const c10::intrusive_ptr<TRTEngine>& self, bool dynamic) -> void {
@@ -71,17 +77,17 @@ static auto TORCHTRT_UNUSED TRTEngineTSRegistrtion =
                int64_t cuda_graph_strategy,
                c10::optional<c10::intrusive_ptr<RuntimeCacheHandle>> runtime_cache) -> void {
               // Strategies cross the Py->C++ boundary as ints (TorchBind uses
-              // ``int64_t``; the struct stores ``int32_t`` mirroring the
-              // nvinfer1 enum values). Validation happens at the Python
-              // boundary in ``RuntimeSettings.__post_init__``.
+              // ``int64_t``; the struct stores enums whose underlying type is
+              // ``int32_t``, mirroring the nvinfer1 enum values). The
+              // ``to_*_strategy`` validators bounds-check and return the enum.
               // ``c10::optional`` lets TorchBind accept Python ``None`` for
               // the cache; translate to a (possibly null) intrusive_ptr.
               RuntimeSettings rs;
-              rs.dynamic_shapes_kernel_specialization_strategy =
-                  static_cast<int32_t>(dynamic_shapes_kernel_specialization_strategy);
-              rs.cuda_graph_strategy = static_cast<int32_t>(cuda_graph_strategy);
+              rs.dynamic_shapes_kernel_specialization_strategy = to_dynamic_shapes_kernel_strategy(
+                  static_cast<int32_t>(dynamic_shapes_kernel_specialization_strategy));
+              rs.cuda_graph_strategy = to_cuda_graph_strategy(static_cast<int32_t>(cuda_graph_strategy));
               rs.runtime_cache = runtime_cache.has_value() ? std::move(*runtime_cache) : nullptr;
-              self->update_runtime_settings(std::move(rs));
+              (void)self->runtime_settings(std::move(rs));
             })
         .def_readwrite("use_pre_allocated_outputs", &TRTEngine::use_pre_allocated_outputs)
         .def_readwrite("pre_allocated_outputs", &TRTEngine::pre_allocated_outputs)

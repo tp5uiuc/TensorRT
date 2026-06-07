@@ -327,7 +327,7 @@ class TRTEngine(OpaqueBase):  # type: ignore[misc]
         self._nccl_comm = None
         # RuntimeSettings are NOT serialized -- restore defaults. Callers
         # who want runtime-mode overrides must reapply them post-load via
-        # ``compiled.set_runtime_settings(...)`` or a runtime CM.
+        # ``mod.runtime_settings = ...`` (per ``TorchTensorRTModule``) or a runtime CM.
         self._trt_runtime_config = TRTRuntimeConfig(RuntimeSettings())
 
         serialized_info = list(state[0])
