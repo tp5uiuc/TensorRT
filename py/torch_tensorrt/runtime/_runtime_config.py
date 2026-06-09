@@ -156,43 +156,25 @@ class TRTRuntimeConfig:
         self._settings: RuntimeSettings = settings or RuntimeSettings()
         # Live trt.IRuntimeConfig (RTX) or None (non-RTX / pre-init).
         self._live: Any = None
-        # Engine-implicit RuntimeCacheHandle when settings.runtime_cache is a
-        # string path; None when external handle / no cache.
-        self._implicit_cache_handle: Any = None
 
     @property
     def settings(self) -> RuntimeSettings:
         """The current ``RuntimeSettings``. Mutate only via :meth:`set_settings`."""
         return self._settings
 
-    @property
-    def implicit_cache_handle(self) -> Any:
-        """The engine-implicit ``RuntimeCacheHandle`` if any, else None.
-
-        Set when ``settings.runtime_cache`` is a path string. The handle's
-        ``__del__`` persists kernels JIT-compiled during the engine's lifetime
-        when ``autosave_on_del`` is True (the default for implicit handles).
-        """
-        return self._implicit_cache_handle
-
     def set_settings(self, new: RuntimeSettings) -> bool:
         """Apply ``new`` settings. Returns True iff the value actually changed.
 
-        On change, the prior implicit handle (if any) is saved before being
-        replaced, the live ``IRuntimeConfig`` is invalidated, and callers
-        should recreate the ``IExecutionContext``.
+        On change, invalidates the live ``IRuntimeConfig`` and signals callers
+        to recreate the ``IExecutionContext``. Disk persistence of any prior
+        implicit cache handle is the module's responsibility (see
+        ``TorchTensorRTModule._materialize_implicit_handle``); this method is
+        a pure-execution swap.
         """
         if new == self._settings:
             return False
-        prior = self._implicit_cache_handle
-        if prior is not None:
-            try:
-                prior.save()
-            except Exception as e:  # never raise from setting swap
-                logger.warning(f"Failed to save implicit runtime cache on swap: {e}")
         self._settings = new
         self._live = None
-        self._implicit_cache_handle = None
         return True
 
     def ensure_initialized(self, cuda_engine: Any) -> None:
@@ -211,7 +193,6 @@ class TRTRuntimeConfig:
     def reset(self) -> None:
         """Drop the live ``IRuntimeConfig``; the next ``ensure_initialized`` rebuilds."""
         self._live = None
-        self._implicit_cache_handle = None
 
     def create_execution_context(
         self,
@@ -273,9 +254,11 @@ class TRTRuntimeConfig:
 
         Resolves ``runtime_cache``:
         - ``None`` ⇒ no cache attached.
-        - ``str`` path ⇒ create an engine-implicit ``RuntimeCacheHandle`` here
-          and attach. Engine owns lifecycle; handle's ``__del__`` saves.
-        - ``RuntimeCacheHandle`` ⇒ external; caller owns lifecycle.
+        - ``RuntimeCacheHandle`` ⇒ caller owns lifecycle (handle holds the
+          IRuntimeCache reference; ``ensure_cache`` materializes it on first
+          use). String paths are pre-wrapped into handles by the upstream
+          :py:meth:`TorchTensorRTModule._materialize_implicit_handle`; raw
+          strings are not accepted here.
         """
         # Deferred imports: trt is import-aliased to tensorrt_rtx on RTX builds,
         # and _runtime_cache imports this module's RuntimeSettings.
@@ -294,26 +277,29 @@ class TRTRuntimeConfig:
 
         rc = self._settings.runtime_cache
         if rc is None:
-            self._implicit_cache_handle = None
             logger.debug(
                 "Runtime cache disabled (no RuntimeCacheHandle / path provided)."
             )
-        elif isinstance(rc, str):
-            cache = self._live.create_runtime_cache()
-            self._implicit_cache_handle = RuntimeCacheHandle(
-                cache=cache, path=rc, autosave_on_del=True
-            )
-            try:
-                self._implicit_cache_handle.load()
-            except Exception as e:
-                logger.warning(f"Failed to load implicit runtime cache: {e}")
-            self._live.set_runtime_cache(cache)
-        else:
-            # External RuntimeCacheHandle. Caller owns lifecycle; the handle
-            # holds the IRuntimeCache reference.
+        elif isinstance(rc, RuntimeCacheHandle):
             cache = rc.ensure_cache(self._live)
-            self._implicit_cache_handle = None
             self._live.set_runtime_cache(cache)
+            # Engine-implicit handles need disk-warm on first attach (the
+            # module's post-dispatch load fires while the pybind cache is
+            # still un-materialized due to lazy IExecutionContext creation;
+            # by the time we're here, ``ensure_cache`` has materialized it).
+            # External + CM-yielded handles (autosave_on_del=False) are loaded
+            # by their owner, not us.
+            if rc.autosave_on_del and rc.path:
+                try:
+                    rc.load()
+                except Exception as e:
+                    logger.warning(f"Failed to load implicit runtime cache: {e}")
+        else:
+            raise TypeError(
+                f"runtime_cache must be None or RuntimeCacheHandle by the time "
+                f"it reaches TRTRuntimeConfig; got {type(rc).__name__}. "
+                f"Path strings should be pre-wrapped by the module."
+            )
         logger.info("TensorRT-RTX runtime config configured")
 
     def _to_trt_ds_strategy(self, trt: Any) -> Any:

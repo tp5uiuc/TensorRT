@@ -82,6 +82,18 @@ def _find_python_trt_engine(compiled):
     return None
 
 
+def _find_python_trt_module(compiled):
+    """The parent ``TorchTensorRTModule`` is the canonical owner of the
+    implicit cache handle (was on ``TRTRuntimeConfig`` before the unification)."""
+    from torch_tensorrt.dynamo.runtime._TorchTensorRTModule import TorchTensorRTModule
+    from torch_tensorrt.dynamo.runtime._TRTEngine import TRTEngine
+
+    for _, mod in compiled.named_modules():
+        if isinstance(mod, TorchTensorRTModule) and isinstance(mod.engine, TRTEngine):
+            return mod
+    return None
+
+
 _RUNTIMES = [("python", True), ("cpp", False)]
 
 
@@ -110,22 +122,22 @@ class TestRuntimeCacheSetup(TestCase):
 
     def test_default_uses_temp_path_implicit_handle(self):
         """Default RuntimeSettings points runtime_cache at the per-user temp file
-        (see _defaults.RUNTIME_CACHE_PATH); the engine creates an implicit handle."""
+        (see _defaults.RUNTIME_CACHE_PATH); the module owns the implicit handle."""
         from torch_tensorrt.dynamo._defaults import RUNTIME_CACHE_PATH
 
         compiled, _ = _compile_simple()
-        engine = _find_python_trt_engine(compiled)
-        self.assertIsNotNone(engine._implicit_cache_handle)
-        self.assertEqual(engine._implicit_cache_handle.path, RUNTIME_CACHE_PATH)
+        module = _find_python_trt_module(compiled)
+        self.assertIsNotNone(module._implicit_cache_handle)
+        self.assertEqual(module._implicit_cache_handle.path, RUNTIME_CACHE_PATH)
 
     def test_implicit_cache_handle_for_path_hint(self):
-        """Passing a path string in RuntimeSettings.runtime_cache creates an implicit handle."""
+        """Passing a path string in RuntimeSettings.runtime_cache creates an implicit handle on the module."""
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "rc.bin")
             compiled, _ = _compile_simple(runtime_cache_path=path)
-            engine = _find_python_trt_engine(compiled)
-            self.assertIsNotNone(engine._implicit_cache_handle)
-            self.assertEqual(engine._implicit_cache_handle.path, path)
+            module = _find_python_trt_module(compiled)
+            self.assertIsNotNone(module._implicit_cache_handle)
+            self.assertEqual(module._implicit_cache_handle.path, path)
 
 
 @unittest.skipIf(

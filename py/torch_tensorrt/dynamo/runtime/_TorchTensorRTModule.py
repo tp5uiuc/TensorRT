@@ -296,87 +296,107 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
         self._runtime_settings = rs
 
     def _dispatch_runtime_settings_to_engine(self, rs: RuntimeSettings) -> None:
-        """Backend-aware dispatch of ``update_runtime_settings(rs)`` to ``self.engine``."""
+        """Backend-aware dispatch of ``update_runtime_settings(rs)`` to ``self.engine``.
+
+        Both runtimes route through :py:meth:`_materialize_implicit_handle`
+        first, so the Python wrapper (and its save-on-swap + autosave-on-del
+        semantics) lives on the module regardless of which engine flavor is
+        attached.
+        """
         if self.engine is None:
             return
         from torch_tensorrt.dynamo.runtime._TRTEngine import TRTEngine
 
+        rs_for_dispatch, needs_load = self._materialize_implicit_handle(rs)
+
         if isinstance(self.engine, TRTEngine):
-            # Python runtime: dataclass passes straight through.
-            self.engine.update_runtime_settings(rs)
-            return
+            # Python runtime: dataclass passes straight through; the engine's
+            # TRTRuntimeConfig will call ``ensure_cache`` on our handle, which
+            # materializes the underlying pybind IRuntimeCache.
+            self.engine.update_runtime_settings(rs_for_dispatch)
+        else:
+            from torch_tensorrt.runtime._runtime_cache import _to_torchbind_handle
+            from torch_tensorrt.runtime._runtime_config import (
+                _CUDA_GRAPH_STRATEGY_MAP,
+                _DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP,
+            )
 
-        # C++ torchbind engine: re-materialize the Python-side implicit cache
-        # wrapper before dispatch (saving the prior wrapper synchronously, to
-        # mirror ``TRTRuntimeConfig.set_settings`` on the Python runtime).
-        rs_for_dispatch, needs_load = self._materialize_cpp_implicit_handle(rs)
+            cache_arg = _to_torchbind_handle(rs_for_dispatch.runtime_cache)
+            # Cross the boundary as ints: the C++ ``RuntimeSettings`` stores
+            # strategies as ``int32_t`` mirrors of the nvinfer1 enum values.
+            self.engine.update_runtime_settings(
+                _DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP[
+                    rs_for_dispatch.dynamic_shapes_kernel_specialization_strategy
+                ],
+                _CUDA_GRAPH_STRATEGY_MAP[rs_for_dispatch.cuda_graph_strategy],
+                cache_arg,
+            )
 
-        from torch_tensorrt.runtime._runtime_cache import _to_torchbind_handle
-        from torch_tensorrt.runtime._runtime_config import (
-            _CUDA_GRAPH_STRATEGY_MAP,
-            _DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP,
-        )
-
-        cache_arg = _to_torchbind_handle(rs_for_dispatch.runtime_cache)
-        # Cross the boundary as ints: the C++ ``RuntimeSettings`` stores the
-        # strategies as ``int32_t`` mirrors of the nvinfer1 enum values.
-        # Strings are validated up-stream at ``RuntimeSettings.__post_init__``.
-        self.engine.update_runtime_settings(
-            _DYNAMIC_SHAPES_KERNEL_STRATEGY_MAP[
-                rs_for_dispatch.dynamic_shapes_kernel_specialization_strategy
-            ],
-            _CUDA_GRAPH_STRATEGY_MAP[rs_for_dispatch.cuda_graph_strategy],
-            cache_arg,
-        )
-        # The C++ engine's `update_runtime_settings` materializes the
-        # IRuntimeCache inside the torchbind handle. Load the on-disk bytes
-        # (filelocked) so the new cache starts warm.
+        # The engine (either flavor) has now materialized the IRuntimeCache
+        # behind the handle. Load on-disk bytes (filelocked) so it starts warm.
         if needs_load and self._implicit_cache_handle is not None:
             try:
                 self._implicit_cache_handle.load()
             except Exception as e:
                 logger.debug(f"Failed to load implicit runtime cache: {e}")
 
-    def _materialize_cpp_implicit_handle(
+    def _materialize_implicit_handle(
         self, rs: RuntimeSettings
     ) -> Tuple[RuntimeSettings, bool]:
-        """Mirror of ``TRTRuntimeConfig._apply_settings`` for the cpp engine path.
+        """Pre-wrap path-string ``runtime_cache`` into a ``RuntimeCacheHandle``.
 
-        When ``rs.runtime_cache`` is a path string, builds a torchbind
-        ``RuntimeCacheHandle`` + Python wrapper and stashes the wrapper on
-        ``self._implicit_cache_handle`` so its ``__del__`` saves the cache
-        on engine destruction. Synchronously saves any prior implicit wrapper
-        before replacing it -- matches the explicit-save semantic in
-        :py:meth:`TRTRuntimeConfig.set_settings` so a settings swap doesn't
-        silently drop kernels JIT-compiled into the prior cache.
+        The module is the single owner of the engine-implicit Python wrapper
+        (was previously split between ``TRTRuntimeConfig._implicit_cache_handle``
+        for Python rt and a module field for cpp rt). This method handles both
+        runtimes by branching on ``self._use_python_runtime``:
+
+        * Python rt: handle is built with no backing yet; the engine's
+          ``TRTRuntimeConfig._apply_settings`` will call ``ensure_cache`` to
+          materialize the pybind IRuntimeCache.
+        * Cpp rt: handle wraps a freshly-created torchbind sibling that the
+          C++ engine materializes when it sees the sibling.
 
         Returns ``(rs_for_dispatch, needs_load)``: ``rs_for_dispatch`` has the
-        path string replaced with the torchbind handle (so dispatch passes the
-        same handle through to the C++ engine); ``needs_load`` indicates the
-        caller should call ``self._implicit_cache_handle.load()`` after the
-        engine has materialized its IRuntimeCache via the handle.
+        path string replaced with the handle (Python rt) or the torchbind
+        sibling (cpp rt). ``needs_load`` signals whether the on-disk bytes
+        should be loaded after the engine attaches the cache.
+
+        Synchronously saves any prior implicit wrapper before replacing it, so
+        a settings swap doesn't silently drop kernels JIT-compiled into the
+        prior cache. Mirrors the explicit-save semantic the Python rt used to
+        get from ``TRTRuntimeConfig.set_settings``.
         """
         from torch_tensorrt.runtime._runtime_cache import RuntimeCacheHandle
 
         old = self._implicit_cache_handle  # type: ignore[has-type]
         rc = rs.runtime_cache
+        # Same wrapper already owned -> CM enter/exit with no override on
+        # ``runtime_cache`` lands here. Re-dispatching the same object would
+        # bounce through ``set_settings`` as if nothing changed; short-circuit.
+        if rc is old and rc is not None:
+            return rs, False
         if isinstance(rc, str) and rc:
-            # No-op fast path: if the prior wrapper is already pointed at the
-            # same disk path and still holds its torchbind sibling, reuse it.
-            # Without this the cpp ``set_settings`` sees a *different*
-            # ``runtime_cache.get()`` pointer every call and invalidates the
-            # execution context even when the user passed identical settings.
-            if (
-                old is not None
-                and getattr(old, "path", None) == rc
-                and old._torchbind is not None
-            ):
-                rs_for_dispatch = rs.merge(runtime_cache=old._torchbind)
-                return rs_for_dispatch, False
-            tb = torch.classes.tensorrt.RuntimeCacheHandle(rc)
-            new = RuntimeCacheHandle(path=rc, autosave_on_del=True, torchbind_handle=tb)
+            # No-op fast path: same disk path + handle is still attached. For
+            # the cpp rt the torchbind sibling must also still be live, since
+            # the C++ engine compares the underlying pointer for equality.
+            if old is not None and getattr(old, "path", None) == rc:
+                if self._use_python_runtime:
+                    rs_for_dispatch = rs.merge(runtime_cache=old)
+                    return rs_for_dispatch, False
+                if old._torchbind is not None:
+                    rs_for_dispatch = rs.merge(runtime_cache=old._torchbind)
+                    return rs_for_dispatch, False
+
+            if self._use_python_runtime:
+                new = RuntimeCacheHandle(path=rc, autosave_on_del=True)
+                rs_for_dispatch = rs.merge(runtime_cache=new)
+            else:
+                tb = torch.classes.tensorrt.RuntimeCacheHandle(rc)
+                new = RuntimeCacheHandle(
+                    path=rc, autosave_on_del=True, torchbind_handle=tb
+                )
+                rs_for_dispatch = rs.merge(runtime_cache=tb)
             self._implicit_cache_handle = new
-            rs_for_dispatch = rs.merge(runtime_cache=tb)
             needs_load = True
         else:
             self._implicit_cache_handle = None
@@ -403,30 +423,45 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
         if self.engine is not None:
             return
 
+        # ``_implicit_cache_handle`` is the canonical single-owner slot for the
+        # engine-implicit ``RuntimeCacheHandle``; both runtimes route through
+        # ``_materialize_implicit_handle`` to populate it. Initialize first so
+        # the helper's read of ``self._implicit_cache_handle`` is well-defined.
+        self._implicit_cache_handle: Any = None
+
         if self._use_python_runtime:
             from torch_tensorrt.dynamo.runtime._TRTEngine import TRTEngine
 
+            # Pre-wrap any path-string ``runtime_cache`` into a handle so the
+            # engine's TRTRuntimeConfig only ever sees handles. The handle's
+            # underlying pybind IRuntimeCache is materialized lazily inside
+            # ``ensure_cache`` when the engine first applies settings.
+            rs_for_engine, needs_load = self._materialize_implicit_handle(
+                self._runtime_settings
+            )
             self.engine = TRTEngine(
                 self._pack_engine_info(),
                 profile_execution=self.profiling_enabled,
-                runtime_settings=self._runtime_settings,
+                runtime_settings=rs_for_engine,
             )
             self.execute_engine_op = torch.ops.tensorrt.execute_engine_python
+            if needs_load and self._implicit_cache_handle is not None:
+                try:
+                    self._implicit_cache_handle.load()
+                except Exception as e:
+                    logger.debug(f"Failed to load implicit runtime cache: {e}")
         else:
             self.engine = torch.classes.tensorrt.Engine(self._pack_engine_info())
             self.execute_engine_op = torch.ops.tensorrt.execute_engine
-            # ``_dispatch_runtime_settings_to_engine`` (cpp branch) handles the
-            # str-path → torchbind handle + Python wrapper materialization, the
-            # dispatch to the C++ engine, AND the on-disk load. Initialize the
-            # attribute first so the helper's access is well-defined.
-            self._implicit_cache_handle: Any = None
             self._dispatch_runtime_settings_to_engine(self._runtime_settings)
-            # Reflect the substituted handle back onto self._runtime_settings
-            # so subsequent reads (CM snapshot/restore) carry the same object.
-            if self._implicit_cache_handle is not None:
-                self._runtime_settings = self._runtime_settings.merge(
-                    runtime_cache=self._implicit_cache_handle._torchbind
-                )
+
+        # Reflect the substituted handle back onto ``self._runtime_settings``
+        # so subsequent reads (CM snapshot/restore, ``mod.runtime_settings``)
+        # carry the same wrapper object the engine sees.
+        if self._implicit_cache_handle is not None:
+            self._runtime_settings = self._runtime_settings.merge(
+                runtime_cache=self._implicit_cache_handle
+            )
 
         # requires_native_multidevice is set by the C++ constructor from the serialized REQUIRES_NATIVE_MULTIDEVICE_IDX field.
         if self.engine.requires_native_multidevice:

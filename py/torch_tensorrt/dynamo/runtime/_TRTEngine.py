@@ -264,11 +264,6 @@ class TRTEngine(OpaqueBase):  # type: ignore[misc]
         """The live ``trt.IRuntimeConfig`` (or ``None`` on non-RTX builds)."""
         return self._trt_runtime_config._live
 
-    @property
-    def _implicit_cache_handle(self) -> Any:
-        """The engine-implicit ``RuntimeCacheHandle`` if a path-string compile-time hint was given."""
-        return self._trt_runtime_config.implicit_cache_handle
-
     def __del__(self) -> None:
         self.close()
 

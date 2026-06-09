@@ -384,5 +384,11 @@ def _to_torchbind_handle(
         )
     if isinstance(rc, torch.ScriptObject):
         return rc
+    # Python ``RuntimeCacheHandle`` that already owns a torchbind sibling:
+    # reuse it so the C++ engine sees the same underlying pointer across calls
+    # (and so the wrapper's ``_torchbind.has_cache()`` stays in sync). Falling
+    # through to constructing a fresh torchbind would orphan the existing one.
+    if isinstance(rc, RuntimeCacheHandle) and rc._torchbind is not None:
+        return rc._torchbind
     path = rc if isinstance(rc, str) else rc.path
     return torch.classes.tensorrt.RuntimeCacheHandle(path)
