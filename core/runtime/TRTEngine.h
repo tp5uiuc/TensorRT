@@ -14,6 +14,7 @@
 #include "c10/cuda/CUDAStream.h"
 #include "torch/custom_class.h"
 
+#include "core/runtime/RuntimeSettings.h"
 #include "core/runtime/TRTEngineProfiler.h"
 #include "core/runtime/TRTRuntimeConfig.h"
 #include "core/runtime/TensorRTBindingNames.h"
@@ -48,11 +49,7 @@ using FlattenedState = std::tuple<
     std::tuple<std::string, std::string>, // serialized metadata
     std::tuple<std::string, std::string>, // Platform
     std::tuple<std::string, std::string>, // Resource Allocation Strategy
-    std::tuple<std::string, std::string>, // requires_native_multidevice
-    std::tuple<std::string, std::string>, // has_runtime_cfg (gates next three)
-    std::tuple<std::string, std::string>, // Runtime Cache Path (TRT-RTX)
-    std::tuple<std::string, std::string>, // Dynamic Shapes Kernel Strategy (TRT-RTX)
-    std::tuple<std::string, std::string> // CUDA Graph Strategy (TRT-RTX)
+    std::tuple<std::string, std::string> // requires_native_multidevice
     >;
 
 struct TorchTRTRuntimeStates {
@@ -158,7 +155,7 @@ struct TRTEngine : torch::CustomClassHolder {
       const std::string& serialized_metadata = "",
       const TRTEngine::ResourceAllocationStrategy resource_allocation_strategy =
           TRTEngine::ResourceAllocationStrategy::kStatic,
-      TRTRuntimeConfig runtime_cfg = TRTRuntimeConfig{});
+      RuntimeSettings runtime_settings = RuntimeSettings{});
 
   TRTEngine(std::vector<std::string> serialized_info);
 
@@ -174,7 +171,7 @@ struct TRTEngine : torch::CustomClassHolder {
       const std::string& serialized_metadata = "",
       const TRTEngine::ResourceAllocationStrategy resource_allocation_strategy =
           TRTEngine::ResourceAllocationStrategy::kStatic,
-      TRTRuntimeConfig runtime_cfg = TRTRuntimeConfig{});
+      RuntimeSettings runtime_settings = RuntimeSettings{});
 
   std::string to_str() const;
   static void verify_serialization_fmt(const std::vector<std::string>& serialized_info);
@@ -282,22 +279,63 @@ struct TRTEngine : torch::CustomClassHolder {
   void set_resource_allocation_strategy(ResourceAllocationStrategy new_strategy);
   ResourceAllocationStrategy get_resource_allocation_strategy();
 
-  // Owns the IRuntimeConfig (where supported) and TRT-RTX runtime state. On older TRT
-  // without IRuntimeConfig (e.g. Jetpack) this just carries strategy values that get
-  // passed to the legacy createExecutionContext overload.
+  // Owns the canonical `RuntimeSettings` plus the live `IRuntimeConfig` derived
+  // from them. The engine forwards `runtime_settings()` and
+  // `update_runtime_settings()` here -- there is no separate settings field on
+  // the engine.
   TRTRuntimeConfig runtime_cfg;
+
+  [[nodiscard]] RuntimeSettings const& runtime_settings() const noexcept {
+    return runtime_cfg.settings();
+  }
+
+  // Setter overload (matches the getter name). Returns true iff the settings
+  // actually changed -- consumers can read the diff result to decide whether
+  // to invalidate dependent state. On change, invalidates the live
+  // ``IRuntimeConfig`` (the next ``ensure_execution_context`` rebuilds with
+  // the new settings).
+  [[nodiscard]] bool runtime_settings(RuntimeSettings new_settings);
+
+  // Whether the engine has any input binding with a dynamic dimension. Computed
+  // once during construction; used by `is_monolithic_capturable`.
+  bool has_dynamic_inputs = false;
 
   // Monolithic-capturability check used when this engine is wrapped by an outer whole-graph
   // capture (e.g. CudaGraphsTorchTensorRTModule). Non-RTX builds always return true.
   bool is_monolithic_capturable(cudaStream_t stream) const;
 
   // Disable TensorRT-RTX native CUDA graph capture on this engine (one-shot, invoked when
-  // an outer stream capture is detected around execute_engine). No-op on non-RTX.
+  // an outer stream capture is detected around execute_engine). No-op on non-RTX or when
+  // already disabled.
   void disable_rtx_native_cudagraphs();
+
+  // Materialize ``exec_ctx`` if it is currently null, using the current settings
+  // from ``runtime_cfg``. Idempotent: a non-null ``exec_ctx`` is left untouched.
+  // Called from every site that needs the live context (``execute_engine``,
+  // ``enable_profiling``, ``bind_nccl_comm``, ``infer_outputs``, etc.).
+  void ensure_execution_context();
+
+  // Drop the live ``exec_ctx`` without recreating. The next ``ensure_execution_context``
+  // (typically inside the next ``execute_engine`` call) will rebuild from the
+  // current ``runtime_cfg`` settings.
+  void invalidate_execution_context() noexcept;
+
+  // Test/observability hook: increments once every time ``runtime_cfg.create_execution_context``
+  // is invoked (i.e. an actual TRT createExecutionContext call, which on RTX
+  // also JIT-compiles the specialized kernel set). Bound on the torchbind class
+  // via a lambda wrapper -- torchbind's ``def`` template is not specialized for
+  // ``const noexcept`` member functions, so this method is registered indirectly.
+  [[nodiscard]] int64_t num_execution_contexts_created() const noexcept {
+    return num_execution_contexts_created_;
+  }
 
  private:
   // Single entry point that (re)creates exec_ctx via runtime_cfg.create_execution_context.
+  // Bumps ``num_execution_contexts_created_``. Callers should normally go through
+  // ``ensure_execution_context`` for the lazy semantics.
   void recreate_execution_context();
+
+  int64_t num_execution_contexts_created_ = 0;
 };
 
 } // namespace runtime

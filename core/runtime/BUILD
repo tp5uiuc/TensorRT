@@ -86,6 +86,7 @@ cc_library(
         "DeviceList.cpp",
         "Platform.cpp",
         "RTDevice.cpp",
+        "RuntimeSettings.cpp",
         "TRTEngine.cpp",
         "TRTEngineProfiler.cpp",
         "TRTRuntimeConfig.cpp",
@@ -96,6 +97,7 @@ cc_library(
     hdrs = [
         "Platform.h",
         "RTDevice.h",
+        "RuntimeSettings.h",
         "TRTEngine.h",
         "TRTEngineProfiler.h",
         "TRTRuntimeConfig.h",
@@ -158,6 +160,7 @@ cc_library(
     hdrs = [
         "Platform.h",
         "RTDevice.h",
+        "RuntimeSettings.h",
         "TRTEngine.h",
         "TRTEngineProfiler.h",
         "TensorRTBindingNames.h",
@@ -174,6 +177,7 @@ filegroup(
     srcs = [
         "Platform.h",
         "RTDevice.h",
+        "RuntimeSettings.h",
         "TRTEngine.h",
         "TRTEngineProfiler.h",
         "TRTRuntimeConfig.h",

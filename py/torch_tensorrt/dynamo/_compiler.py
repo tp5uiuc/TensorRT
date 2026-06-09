@@ -53,6 +53,7 @@ from torch_tensorrt.dynamo.utils import (
     to_torch_device,
     to_torch_tensorrt_device,
 )
+from torch_tensorrt.runtime._runtime_config import RuntimeSettings
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +90,6 @@ def cross_compile_for_windows(
     dryrun: bool = _defaults.DRYRUN,
     hardware_compatible: bool = _defaults.HARDWARE_COMPATIBLE,
     timing_cache_path: str = _defaults.TIMING_CACHE_PATH,
-    runtime_cache_path: str = _defaults.RUNTIME_CACHE_PATH,
-    dynamic_shapes_kernel_specialization_strategy: str = _defaults.DYNAMIC_SHAPES_KERNEL_SPECIALIZATION_STRATEGY,
-    cuda_graph_strategy: str = _defaults.CUDA_GRAPH_STRATEGY,
     lazy_engine_init: bool = _defaults.LAZY_ENGINE_INIT,
     cache_built_engines: bool = _defaults.CACHE_BUILT_ENGINES,
     reuse_cached_engines: bool = _defaults.REUSE_CACHED_ENGINES,
@@ -170,9 +168,6 @@ def cross_compile_for_windows(
         dryrun (bool): Toggle for "Dryrun" mode, running everything except conversion to TRT and logging outputs
         hardware_compatible (bool): Build the TensorRT engines compatible with GPU architectures other than that of the GPU on which the engine was built (currently works for NVIDIA Ampere and newer)
         timing_cache_path (str): Path to the timing cache if it exists (or) where it will be saved after compilation. Not used for TensorRT-RTX.
-        runtime_cache_path (str): Path to the runtime cache for TensorRT-RTX JIT compilation results. Not used for standard TensorRT.
-        dynamic_shapes_kernel_specialization_strategy (str): Strategy for dynamic shape kernel specialization at runtime (TensorRT-RTX only). Options: "lazy", "eager", "none". Default: "lazy".
-        cuda_graph_strategy (str): Strategy for CUDA graph capture/replay (TensorRT-RTX only). Options: "disabled" (manual capture), "whole_graph_capture" (TRT-RTX handles internally). Default: "disabled".
         lazy_engine_init (bool): Defer setting up engines until the compilation of all engines is complete. Can allow larger models with multiple graph breaks to compile but can lead to oversubscription of GPU memory at runtime.
         cache_built_engines (bool): Whether to save the compiled TRT engines to storage
         reuse_cached_engines (bool): Whether to load the compiled TRT engines from storage
@@ -318,9 +313,6 @@ def cross_compile_for_windows(
         "dryrun": dryrun,
         "hardware_compatible": hardware_compatible,
         "timing_cache_path": timing_cache_path,
-        "runtime_cache_path": runtime_cache_path,
-        "dynamic_shapes_kernel_specialization_strategy": dynamic_shapes_kernel_specialization_strategy,
-        "cuda_graph_strategy": cuda_graph_strategy,
         "lazy_engine_init": lazy_engine_init,
         "cache_built_engines": cache_built_engines,
         "reuse_cached_engines": reuse_cached_engines,
@@ -353,12 +345,6 @@ def cross_compile_for_windows(
             logger.warning(
                 f"arg: {key} is not supported for cross compilation for windows feature, hence it is disabled."
             )
-
-    if "runtime_cache_path" in compilation_options:
-        compilation_options.pop("runtime_cache_path")
-        logger.warning(
-            "runtime_cache_path is a JIT-time API and is not applicable to cross compilation for windows. Ignoring."
-        )
 
     settings = CompilationSettings(**compilation_options)
     logger.info("Compilation Settings: %s\n", settings)
@@ -433,9 +419,6 @@ def compile(
     dryrun: bool = _defaults.DRYRUN,
     hardware_compatible: bool = _defaults.HARDWARE_COMPATIBLE,
     timing_cache_path: str = _defaults.TIMING_CACHE_PATH,
-    runtime_cache_path: str = _defaults.RUNTIME_CACHE_PATH,
-    dynamic_shapes_kernel_specialization_strategy: str = _defaults.DYNAMIC_SHAPES_KERNEL_SPECIALIZATION_STRATEGY,
-    cuda_graph_strategy: str = _defaults.CUDA_GRAPH_STRATEGY,
     lazy_engine_init: bool = _defaults.LAZY_ENGINE_INIT,
     cache_built_engines: bool = _defaults.CACHE_BUILT_ENGINES,
     reuse_cached_engines: bool = _defaults.REUSE_CACHED_ENGINES,
@@ -469,6 +452,7 @@ def compile(
     dynamically_allocate_resources: bool = _defaults.DYNAMICALLY_ALLOCATE_RESOURCES,
     decompose_attention: bool = _defaults.DECOMPOSE_ATTENTION,
     attn_bias_is_causal: bool = _defaults.ATTN_BIAS_IS_CAUSAL,
+    runtime_settings: Optional[RuntimeSettings] = None,
     **kwargs: Any,
 ) -> torch.fx.GraphModule:
     """Compile an ExportedProgram module for NVIDIA GPUs using TensorRT
@@ -529,9 +513,6 @@ def compile(
         dryrun (bool): Toggle for "Dryrun" mode, running everything except conversion to TRT and logging outputs
         hardware_compatible (bool): Build the TensorRT engines compatible with GPU architectures other than that of the GPU on which the engine was built (currently works for NVIDIA Ampere and newer)
         timing_cache_path (str): Path to the timing cache if it exists (or) where it will be saved after compilation. Not used for TensorRT-RTX.
-        runtime_cache_path (str): Path to the runtime cache for TensorRT-RTX JIT compilation results. Not used for standard TensorRT.
-        dynamic_shapes_kernel_specialization_strategy (str): Strategy for dynamic shape kernel specialization at runtime (TensorRT-RTX only). Options: "lazy", "eager", "none". Default: "lazy".
-        cuda_graph_strategy (str): Strategy for CUDA graph capture/replay (TensorRT-RTX only). Options: "disabled" (manual capture), "whole_graph_capture" (TRT-RTX handles internally). Default: "disabled".
         lazy_engine_init (bool): Defer setting up engines until the compilation of all engines is complete. Can allow larger models with multiple graph breaks to compile but can lead to oversubscription of GPU memory at runtime.
         cache_built_engines (bool): Whether to save the compiled TRT engines to storage
         reuse_cached_engines (bool): Whether to load the compiled TRT engines from storage
@@ -709,9 +690,6 @@ def compile(
         "dryrun": dryrun,
         "hardware_compatible": hardware_compatible,
         "timing_cache_path": timing_cache_path,
-        "runtime_cache_path": runtime_cache_path,
-        "dynamic_shapes_kernel_specialization_strategy": dynamic_shapes_kernel_specialization_strategy,
-        "cuda_graph_strategy": cuda_graph_strategy,
         "lazy_engine_init": lazy_engine_init,
         "cache_built_engines": cache_built_engines,
         "reuse_cached_engines": reuse_cached_engines,
@@ -775,7 +753,12 @@ def compile(
                 "Remaining GPU memory may not be enough to compile the TensorRT engine for this model resulting in an OOM error, Consider setting offload_module_to_cpu=True"
             )
     trt_gm = compile_module(
-        gm, trt_arg_inputs, trt_kwarg_inputs, settings, engine_cache
+        gm,
+        trt_arg_inputs,
+        trt_kwarg_inputs,
+        settings,
+        engine_cache,
+        runtime_settings=runtime_settings,
     )
     return trt_gm
 
@@ -889,6 +872,7 @@ def compile_module(
     engine_cache: Optional[BaseEngineCache] = None,
     *,
     _debugger_config: Optional[DebuggerConfig] = None,
+    runtime_settings: Optional[RuntimeSettings] = None,
 ) -> torch.fx.GraphModule:
     """Compile a traced FX module
 
@@ -1126,6 +1110,7 @@ def compile_module(
                 settings=settings,
                 name=name,
                 engine_cache=engine_cache,
+                runtime_settings=runtime_settings,
             )
 
             trt_modules[name] = trt_module
@@ -1230,9 +1215,6 @@ def convert_exported_program_to_serialized_trt_engine(
     dryrun: bool = _defaults.DRYRUN,
     hardware_compatible: bool = _defaults.HARDWARE_COMPATIBLE,
     timing_cache_path: str = _defaults.TIMING_CACHE_PATH,
-    runtime_cache_path: str = _defaults.RUNTIME_CACHE_PATH,
-    dynamic_shapes_kernel_specialization_strategy: str = _defaults.DYNAMIC_SHAPES_KERNEL_SPECIALIZATION_STRATEGY,
-    cuda_graph_strategy: str = _defaults.CUDA_GRAPH_STRATEGY,
     lazy_engine_init: bool = _defaults.LAZY_ENGINE_INIT,
     cache_built_engines: bool = _defaults.CACHE_BUILT_ENGINES,
     reuse_cached_engines: bool = _defaults.REUSE_CACHED_ENGINES,
@@ -1307,9 +1289,6 @@ def convert_exported_program_to_serialized_trt_engine(
         dryrun (bool): Toggle for "Dryrun" mode, running everything except conversion to TRT and logging outputs
         hardware_compatible (bool): Build the TensorRT engines compatible with GPU architectures other than that of the GPU on which the engine was built (currently works for NVIDIA Ampere and newer)
         timing_cache_path (str): Path to the timing cache if it exists (or) where it will be saved after compilation. Not used for TensorRT-RTX.
-        runtime_cache_path (str): Path to the runtime cache for TensorRT-RTX JIT compilation results. Not used for standard TensorRT.
-        dynamic_shapes_kernel_specialization_strategy (str): Strategy for dynamic shape kernel specialization at runtime (TensorRT-RTX only). Options: "lazy", "eager", "none". Default: "lazy".
-        cuda_graph_strategy (str): Strategy for CUDA graph capture/replay (TensorRT-RTX only). Options: "disabled" (manual capture), "whole_graph_capture" (TRT-RTX handles internally). Default: "disabled".
         lazy_engine_init (bool): Defer setting up engines until the compilation of all engines is complete. Can allow larger models with multiple graph breaks to compile but can lead to oversubscription of GPU memory at runtime.
         cache_built_engines (bool): Whether to save the compiled TRT engines to storage
         reuse_cached_engines (bool): Whether to load the compiled TRT engines from storage
@@ -1464,9 +1443,6 @@ def convert_exported_program_to_serialized_trt_engine(
         "dryrun": dryrun,
         "hardware_compatible": hardware_compatible,
         "timing_cache_path": timing_cache_path,
-        "runtime_cache_path": runtime_cache_path,
-        "dynamic_shapes_kernel_specialization_strategy": dynamic_shapes_kernel_specialization_strategy,
-        "cuda_graph_strategy": cuda_graph_strategy,
         "lazy_engine_init": lazy_engine_init,
         "cache_built_engines": cache_built_engines,
         "reuse_cached_engines": reuse_cached_engines,
@@ -1484,11 +1460,6 @@ def convert_exported_program_to_serialized_trt_engine(
         "attn_bias_is_causal": attn_bias_is_causal,
         "use_python_runtime": use_python_runtime,
     }
-    if "runtime_cache_path" in compilation_options:
-        compilation_options.pop("runtime_cache_path")
-        logger.warning(
-            "runtime_cache_path is a JIT-time API and is not applicable to serialized engine export. Ignoring."
-        )
 
     settings = CompilationSettings(**compilation_options)
     logger.info("Compilation Settings: %s\n", settings)

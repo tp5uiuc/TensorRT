@@ -41,11 +41,6 @@ typedef enum {
   REQUIRES_OUTPUT_ALLOCATOR_IDX,
   RESOURCE_ALLOCATION_STRATEGY_IDX,
   REQUIRES_NATIVE_MULTIDEVICE_IDX,
-  // HAS_RUNTIME_CFG_IDX gates the next three slots. When "0", their values are ignored.
-  HAS_RUNTIME_CFG_IDX,
-  RUNTIME_CACHE_PATH_IDX,
-  DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX,
-  CUDA_GRAPH_STRATEGY_IDX,
   SERIALIZATION_LEN, // NEVER USED FOR DATA, USED TO DETERMINE LENGTH OF SERIALIZED INFO
 } SerializedInfoIndex;
 
@@ -62,10 +57,6 @@ inline constexpr std::array<const char*, SERIALIZATION_LEN> kSerializedInfoIndex
     "REQUIRES_OUTPUT_ALLOCATOR_IDX",
     "RESOURCE_ALLOCATION_STRATEGY_IDX",
     "REQUIRES_NATIVE_MULTIDEVICE_IDX",
-    "HAS_RUNTIME_CFG_IDX",
-    "RUNTIME_CACHE_PATH_IDX",
-    "DYNAMIC_SHAPES_KERNEL_STRATEGY_IDX",
-    "CUDA_GRAPH_STRATEGY_IDX",
 }};
 // For adding new serialized info indices, update above and update /dynamo/runtime/_serialized_engine_layout.py
 

@@ -1,98 +1,82 @@
 #pragma once
 
 #include <cuda_runtime.h>
-#include <cstdint>
 #include <memory>
 #include <ostream>
 #include <string>
-#include <type_traits>
-#include <vector>
+#include <utility>
 
 #include "NvInfer.h"
+#include "core/runtime/RuntimeSettings.h"
 
 namespace torch_tensorrt {
 namespace core {
 namespace runtime {
 
-// TensorRT-RTX-only configuration for how shape-specialized kernels are compiled.
-enum class DynamicShapesKernelStrategy : int32_t {
-  kLazy = 0,
-  kEager = 1,
-  kNone = 2,
-};
-
-// TensorRT-RTX-only configuration for how CUDA graph capture/replay is handled.
-enum class CudaGraphStrategyOption : int32_t {
-  kDisabled = 0,
-  kWholeGraphCapture = 1,
-};
-
-// Encapsulates the IRuntimeConfig and TRT-RTX runtime state for a TRTEngine.
-// IRuntimeConfig and runtime-cache `#ifdef`s are confined to this TU; serialization-
-// index plumbing keeps its own RTX gates elsewhere.
+// Owns the canonical `RuntimeSettings` for an engine, the live `IRuntimeConfig`
+// derived from those settings (where supported), and translates strategy
+// strings into TRT calls. All `TRT_HAS_IRUNTIME_CONFIG` / `TRT_MAJOR_RTX`
+// branching is confined to this TU.
+//
+// `TRTEngine` holds a `TRTRuntimeConfig` member; the engine itself does not
+// store a separate `RuntimeSettings`. `engine.runtime_settings()` forwards
+// here.
 struct TRTRuntimeConfig {
-  // Settings - typically populated from engine deserialization before `ensure_initialized`.
-  std::string runtime_cache_path = "";
-  DynamicShapesKernelStrategy dynamic_shapes_kernel_strategy = DynamicShapesKernelStrategy::kLazy;
-  CudaGraphStrategyOption cuda_graph_strategy = CudaGraphStrategyOption::kDisabled;
+  TRTRuntimeConfig() = default;
+  explicit TRTRuntimeConfig(RuntimeSettings settings) : settings_(std::move(settings)) {}
 
-  // One-shot: set to true once an outer stream capture has been detected and the
-  // engine-internal CUDA graph strategy has been disabled for the remainder of the
-  // owning engine's lifetime.
-  bool rtx_native_cudagraphs_disabled = false;
+  // Canonical user-facing runtime settings for this engine. Mutated only via
+  // the `settings(RuntimeSettings)` overload below so the live `IRuntimeConfig`
+  // stays in sync.
+  [[nodiscard]] RuntimeSettings const& settings() const noexcept {
+    return settings_;
+  }
 
-  bool has_dynamic_inputs = true;
+  // Setter overload (matches the getter's name). Returns true iff
+  // `new_settings` differs from the current settings (i.e. the caller should
+  // recreate the `IExecutionContext`). On change the live `IRuntimeConfig` is
+  // invalidated; the next `ensure_initialized` rebuilds. The `[[nodiscard]]`
+  // attribute ensures callers check the diff result so they don't miss the
+  // invalidation signal.
+  [[nodiscard]] bool settings(RuntimeSettings new_settings);
 
-  // Live resources. The IRuntimeConfig is lazy-constructed on first `ensure_initialized`
-  // and is unavailable on TensorRT versions older than 10.11 (e.g. Jetpack).
-#ifdef TRT_HAS_IRUNTIME_CONFIG
-  std::shared_ptr<nvinfer1::IRuntimeConfig> config;
-#endif
-#ifdef TRT_MAJOR_RTX
-  std::shared_ptr<nvinfer1::IRuntimeCache> runtime_cache;
-#endif
-
-  // Lazily construct the IRuntimeConfig and apply RTX-specific settings. Idempotent.
-  // No-op on builds without IRuntimeConfig (e.g. Jetpack).
+  // (Re)build the `IRuntimeConfig` from `settings_`. Idempotent if the previous
+  // build was against identical settings.
   void ensure_initialized(nvinfer1::ICudaEngine* cuda_engine);
 
-  // Lazy-initialize the IRuntimeConfig if needed and create an IExecutionContext that
-  // honors `allocation_strategy`. Selects the right `createExecutionContext` overload
-  // (IRuntimeConfig* vs ExecutionContextAllocationStrategy) so callers stay free of
-  // any TRT_HAS_IRUNTIME_CONFIG branching.
+  // Force the next `ensure_initialized` to rebuild from scratch.
+  void reset();
+
+  // Lazy-init + create a fresh `IExecutionContext` honoring `allocation_strategy`.
+  // Picks the right `createExecutionContext` overload (IRuntimeConfig* vs
+  // ExecutionContextAllocationStrategy) so callers stay free of any
+  // `TRT_HAS_IRUNTIME_CONFIG` branching.
   [[nodiscard]] std::shared_ptr<nvinfer1::IExecutionContext> create_execution_context(
       nvinfer1::ICudaEngine* cuda_engine,
       nvinfer1::ExecutionContextAllocationStrategy allocation_strategy);
 
-  // Returns true if the TensorRT-RTX runtime owns capture/replay for this engine so the
-  // caller should bypass its own at::cuda::CUDAGraph capture around enqueueV3. Always
-  // false on non-RTX builds.
-  [[nodiscard]] bool uses_internal_capture(bool cudagraphs_enabled) const;
+  // Returns true if TRT-RTX owns capture/replay for the current settings --
+  // caller should then bypass its own `at::cuda::CUDAGraph` capture around
+  // enqueueV3. Always false on non-RTX builds.
+  [[nodiscard]] bool uses_internal_capture(bool cudagraphs_enabled) const noexcept;
 
-  // One-shot: disable engine-internal CUDA graph capture. Invoked when an outer stream
-  // capture is detected around execute_engine, so the outer capture can contain the
-  // kernel launches directly. Saves the runtime cache before recreating the context so
-  // compiled kernels from the present run are preserved for future reloads.
-  void disable_rtx_native_cudagraphs(const std::string& engine_name) noexcept;
+  // Returns true iff the execution context can be safely included in an outer
+  // monolithic capture. Non-RTX builds always return true. Not noexcept: the
+  // RTX path asserts ``exec_ctx != nullptr`` via ``TORCHTRT_ASSERT`` which can
+  // throw on assertion failure.
+  [[nodiscard]] bool is_monolithic_capturable(
+      bool has_dynamic_inputs,
+      nvinfer1::IExecutionContext* exec_ctx,
+      cudaStream_t stream) const;
 
-  // Whether the execution context is safe to include in an outer monolithic capture.
-  // Non-RTX builds always return true.
-  [[nodiscard]] bool is_monolithic_capturable(nvinfer1::IExecutionContext* exec_ctx, cudaStream_t stream) const;
+#ifdef TRT_HAS_IRUNTIME_CONFIG
+  // Lazy-constructed live config. `nullptr` until first `ensure_initialized`.
+  std::shared_ptr<nvinfer1::IRuntimeConfig> config;
+#endif
 
-  // Save the runtime cache to disk. Signature is `noexcept` so this is safe from a
-  // destructor. The underlying file I/O is performed by free functions declared below
-  // (non-noexcept, exception-leaky for easier testing); this member wraps them and
-  // swallows any exceptions.
-  void save_runtime_cache() noexcept;
-
-  // Returns a human-readable summary of the runtime config.
-  [[nodiscard]] std::string to_str() const;
+ private:
+  RuntimeSettings settings_;
 };
-
-// Construct a TRTRuntimeConfig from a flattened serialization vector. Reads the
-// RTX-only indices only on RTX builds; standard TRT builds return a default-initialized
-// struct.
-[[nodiscard]] TRTRuntimeConfig make_runtime_config_from_serialized(const std::vector<std::string>& info);
 
 std::ostream& operator<<(std::ostream& os, const TRTRuntimeConfig& cfg);
 
