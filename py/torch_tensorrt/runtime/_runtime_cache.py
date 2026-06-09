@@ -20,7 +20,7 @@ import logging
 import os
 import shutil
 import threading
-from typing import Any, Optional, Sequence, Union
+from typing import IO, Any, Optional, Sequence, Union
 
 import torch
 import torch_tensorrt
@@ -116,6 +116,45 @@ class RuntimeCacheHandle:
             self._torchbind.deserialize(tensor)
             return
 
+    def load_from_stream(self, stream: IO[bytes]) -> int:
+        """Read bytes from ``stream`` and deserialize into the underlying cache.
+
+        Returns the number of bytes consumed. No-op (returns 0) when no cache
+        backing is present, the stream isn't readable, or the stream is empty.
+        Path-mode :meth:`load` delegates here once the file is opened.
+        """
+        if self._cache is None and self._torchbind is None:
+            return 0
+        try:
+            data = stream.read()
+        except (AttributeError, OSError):
+            # Write-only or otherwise unreadable -- treat as "nothing to load".
+            return 0
+        if not data:
+            return 0
+        self._write_bytes(data)
+        logger.debug(f"Loaded runtime cache from stream ({len(data)} bytes)")
+        return len(data)
+
+    def save_to_stream(self, stream: IO[bytes]) -> int:
+        """Serialize the underlying cache and write bytes to ``stream``.
+
+        Returns the number of bytes written. No-op (returns 0) when the cache
+        has nothing to serialize or the stream isn't writable. Path-mode
+        :meth:`save` delegates here once the temp file is opened.
+        """
+        data = self._read_bytes()
+        if not data:
+            return 0
+        try:
+            stream.write(data)
+        except (AttributeError, OSError):
+            # Read-only stream; caller's choice -- stay silent rather than
+            # propagate, matching the early-return for an empty path.
+            return 0
+        logger.debug(f"Saved runtime cache to stream ({len(data)} bytes)")
+        return len(data)
+
     def load(self, path: Optional[str] = None) -> None:
         """Read bytes from disk and deserialize into the underlying cache.
 
@@ -135,10 +174,7 @@ class RuntimeCacheHandle:
 
         with FileLock(target + ".lock").acquire(timeout=_FILELOCK_TIMEOUT_S):
             with open(target, "rb") as f:
-                data = f.read()
-        if data:
-            self._write_bytes(data)
-            logger.debug(f"Loaded runtime cache from {target} ({len(data)} bytes)")
+                self.load_from_stream(f)
 
     def save(self, path: Optional[str] = None) -> None:
         """Serialize the underlying cache and write to disk under a filelock.
@@ -150,9 +186,6 @@ class RuntimeCacheHandle:
         target = path if path is not None else self.path
         if not target:
             return
-        data = self._read_bytes()
-        if not data:
-            return
         from filelock import FileLock
 
         parent = os.path.dirname(target)
@@ -161,9 +194,16 @@ class RuntimeCacheHandle:
         tmp = target + ".tmp"
         with FileLock(target + ".lock").acquire(timeout=_FILELOCK_TIMEOUT_S):
             with open(tmp, "wb") as f:
-                f.write(data)
-            shutil.move(tmp, target)
-        logger.debug(f"Saved runtime cache to {target} ({len(data)} bytes)")
+                wrote = self.save_to_stream(f)
+            # If the cache had nothing to serialize, drop the empty tmp file
+            # rather than promote a zero-byte cache file over the destination.
+            if wrote:
+                shutil.move(tmp, target)
+            else:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
 
     def __del__(self) -> None:
         # Best-effort autosave for engine-implicit handles. The CM disables
@@ -197,22 +237,47 @@ class _RuntimeCacheContextManager:
     """``with runtime_cache(target, path) as rc:`` -- shared cache CM.
 
     Bootstraps an ``IRuntimeCache`` from one of the engines under target,
-    wraps it in a :class:`RuntimeCacheHandle`, loads from disk, attaches to
-    all engines under all listed targets for the duration of the block, and
-    saves on exit if ``autosave``.
+    wraps it in a :class:`RuntimeCacheHandle`, loads from disk (or a
+    user-provided stream), attaches to all engines under all listed targets
+    for the duration of the block, and saves on exit if ``autosave``.
+
+    The ``path`` slot is overloaded:
+
+    * ``str`` / ``os.PathLike`` -> file-backed (load from + atomic-write to
+      disk under a ``filelock``).
+    * file-like (anything with ``.read`` or ``.write``) -> stream-backed
+      (``.read()`` once on enter, ``.write(bytes)`` once on exit). The caller
+      owns open/close/flush via their own ``with open(...)`` block. Useful
+      for ``io.BytesIO``, gzip streams, or any other in-memory sink.
+    * ``""`` (default) -> in-memory only.
     """
 
     def __init__(
         self,
         target_or_targets: Union["torch.nn.Module", Sequence["torch.nn.Module"]],
-        path: str = "",
+        path: Union[str, "os.PathLike[str]", IO[bytes], Any] = "",
         autosave: bool = True,
     ) -> None:
         if isinstance(target_or_targets, torch.nn.Module):
             self._targets: tuple[torch.nn.Module, ...] = (target_or_targets,)
         else:
             self._targets = tuple(target_or_targets)
-        self.path = path
+
+        # Resolve the IO source. ``self.path`` stays a real string so that
+        # ``rc.path`` keeps the same shape for callers; stream-mode reports
+        # ``""`` here.
+        if isinstance(path, (str, os.PathLike)):
+            self.path = os.fspath(path) if path else ""
+            self._stream: Optional[IO[bytes]] = None
+        elif hasattr(path, "read") or hasattr(path, "write"):
+            self.path = ""
+            self._stream = path
+        else:
+            raise TypeError(
+                "runtime_cache(): 'path' must be str, os.PathLike, or a "
+                f"file-like object (with .read or .write); got {type(path).__name__}"
+            )
+
         self.autosave = autosave
         self.handle: Optional[RuntimeCacheHandle] = None
         self._inner_cm: Any = None
@@ -254,8 +319,11 @@ class _RuntimeCacheContextManager:
             cache=cache_obj, path=self.path, autosave_on_del=False
         )
 
-        # 3. Load from disk if path was given.
-        self.handle.load()
+        # 3. Load from disk (path-mode) or from the user-provided stream.
+        if self._stream is not None:
+            self.handle.load_from_stream(self._stream)
+        else:
+            self.handle.load()
 
         # 4. Apply the handle to ALL engines under target(s) via runtime_config CM.
         self._inner_cm = runtime_config(list(self._targets), runtime_cache=self.handle)
@@ -265,17 +333,25 @@ class _RuntimeCacheContextManager:
     def __exit__(self, *args: Any) -> None:
         if self._inner_cm is not None:
             self._inner_cm.__exit__(*args)
-        if self.autosave and self.path and self.handle is not None:
-            self.handle.save()
+        if self.autosave and self.handle is not None:
+            if self._stream is not None:
+                self.handle.save_to_stream(self._stream)
+            elif self.path:
+                self.handle.save()
 
 
 def runtime_cache(
     target_or_targets: Union["torch.nn.Module", Sequence["torch.nn.Module"]],
-    path: str = "",
+    path: Union[str, "os.PathLike[str]", IO[bytes], Any] = "",
     autosave: bool = True,
 ) -> _RuntimeCacheContextManager:
     """Context manager that attaches a shared runtime cache to all engines
     under ``target_or_targets`` for the duration of the ``with`` block.
+
+    ``path`` accepts a filesystem path (``str``/``os.PathLike``) or a
+    file-like object (anything with ``.read`` / ``.write``, e.g. an opened
+    file handle or ``io.BytesIO``). Streams are read once on enter and
+    written once on exit; ownership of open/close stays with the caller.
 
     Yields the :class:`RuntimeCacheHandle` for inspection or explicit
     ``handle.save()`` calls (e.g., for mid-block checkpointing -- caller is

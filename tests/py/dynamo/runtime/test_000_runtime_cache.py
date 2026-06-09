@@ -1,4 +1,5 @@
 import gc
+import io
 import os
 import shutil
 import tempfile
@@ -314,6 +315,91 @@ class TestRuntimeCacheHandleAutosave(TestCase):
                 os.path.exists(path),
                 "User-built handle with autosave_on_del=False should not save on GC",
             )
+
+
+@unittest.skipIf(
+    not ENABLED_FEATURES.tensorrt_rtx,
+    "runtime_cache stream-mode is RTX-only",
+)
+class TestRuntimeCacheStreamSupport(TestCase):
+    """Stream-backed flavor of the runtime_cache CM.
+
+    Mirrors the path-mode tests but routes through file-like objects:
+    opened file handles (``"wb+"``) and ``io.BytesIO`` buffers. The handle's
+    ``load_from_stream`` / ``save_to_stream`` primitives are exercised
+    directly in the round-trip test.
+    """
+
+    def test_stream_bytesio_round_trip(self):
+        """Write cache bytes through BytesIO once, read them back into a fresh module."""
+        compiled_a, inputs_a = _compile_simple()
+        buf = io.BytesIO()
+        with runtime_cache(compiled_a, buf) as rc_a:
+            self.assertEqual(rc_a.path, "", "stream-mode keeps path empty")
+            _ = compiled_a(*inputs_a)
+        written = buf.getvalue()
+        self.assertGreater(
+            len(written),
+            0,
+            "CM exit should have written cache bytes into BytesIO",
+        )
+
+        # Round-trip: fresh module + fresh BytesIO seeded with the bytes.
+        compiled_b, inputs_b = _compile_simple()
+        replay = io.BytesIO(written)
+        with runtime_cache(compiled_b, replay) as rc_b:
+            # Load fired on enter; the cache should now serialize back to bytes.
+            sanity = io.BytesIO()
+            wrote_back = rc_b.save_to_stream(sanity)
+            self.assertGreater(
+                wrote_back,
+                0,
+                "load_from_stream should have populated the cache",
+            )
+            _ = compiled_b(*inputs_b)
+
+    def test_stream_open_file_handle(self):
+        """Pass an opened binary file handle directly to the CM."""
+        compiled, inputs = _compile_simple()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "rc.bin")
+            with open(path, "wb+") as f:
+                with runtime_cache(compiled, f) as rc:
+                    self.assertEqual(rc.path, "")
+                    _ = compiled(*inputs)
+                # On CM exit the handle wrote into f; closing the with-open
+                # flushes it. Verify after closure to avoid asserting on a
+                # half-flushed stream.
+            self.assertGreater(
+                os.path.getsize(path),
+                0,
+                "CM exit should have written cache bytes into the file handle",
+            )
+
+    def test_handle_stream_methods_direct(self):
+        """Exercise RuntimeCacheHandle.{load,save}_from_stream on a CM-yielded handle."""
+        compiled_a, inputs_a = _compile_simple()
+        with runtime_cache(compiled_a, "") as rc_a:
+            _ = compiled_a(*inputs_a)
+            buf = io.BytesIO()
+            n = rc_a.save_to_stream(buf)
+        if n == 0:
+            self.skipTest(
+                "cache had nothing to serialize after the warmup -- nothing to "
+                "round-trip"
+            )
+
+        compiled_b, _ = _compile_simple()
+        with runtime_cache(compiled_b, "") as rc_b:
+            buf.seek(0)
+            m = rc_b.load_from_stream(buf)
+            self.assertEqual(m, n, "round-trip should consume the same byte count")
+
+    def test_rejects_unsupported_io_type(self):
+        """An int / random object is neither a path nor a stream -> TypeError."""
+        compiled, _ = _compile_simple()
+        with self.assertRaises(TypeError):
+            runtime_cache(compiled, 42)  # type: ignore[arg-type]
 
 
 if __name__ == "__main__":
