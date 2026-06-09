@@ -235,6 +235,11 @@ class TRTEngine(OpaqueBase):  # type: ignore[misc]
         # When true, ``_execute_standard`` must skip manual torch.cuda.CUDAGraph
         # capture because TRT-RTX handles it internally.
         self._rtx_native_cudagraphs: bool = False
+        # Counts ``createExecutionContext`` invocations on this engine; each
+        # one (re)JITs the specialized kernel set on RTX, so tests assert on
+        # it. Mirrors ``TRTEngine::num_execution_contexts_created`` on the
+        # C++ side.
+        self._num_execution_contexts_created: int = 0
         # NCCL communicator is bound lazily on the first forward pass for
         # engines compiled with native multi-device collective layers.
         self._nccl_comm: Optional[Any] = None
@@ -317,6 +322,7 @@ class TRTEngine(OpaqueBase):  # type: ignore[misc]
         )
         self.resource_allocation_strategy = 0
         self._rtx_native_cudagraphs = False
+        self._num_execution_contexts_created = 0
         # NCCL communicators cannot be pickled; rebind lazily on the next
         # forward pass via setup_nccl_comm().
         self._nccl_comm = None
@@ -431,11 +437,7 @@ class TRTEngine(OpaqueBase):  # type: ignore[misc]
             self.cuda_engine, alloc_strategy
         )
         assert context is not None, "Failed to create execution context"
-        # Mirrors ``TRTEngine::num_execution_contexts_created`` on the C++ side;
-        # used by tests to assert single createExecutionContext per engine setup.
-        self._num_execution_contexts_created = (
-            getattr(self, "_num_execution_contexts_created", 0) + 1
-        )
+        self._num_execution_contexts_created += 1
         return context
 
     def num_execution_contexts_created(self) -> int:
@@ -444,7 +446,7 @@ class TRTEngine(OpaqueBase):  # type: ignore[misc]
         Each call (re)JITs the specialized kernel set on RTX, so this is the
         canonical counter for the setup-cost regression test.
         """
-        return getattr(self, "_num_execution_contexts_created", 0)
+        return self._num_execution_contexts_created
 
     def _setup_engine(self) -> None:
         multi_gpu_device_check()

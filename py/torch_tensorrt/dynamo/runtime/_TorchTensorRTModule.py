@@ -287,11 +287,10 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
 
         Operates on ``self`` only -- callers walking an outer
         ``nn.Module`` should iterate ``named_modules()`` and assign per
-        ``TorchTensorRTModule``.
+        ``TorchTensorRTModule``. ``_dispatch_runtime_settings_to_engine``
+        already early-returns when ``self.engine is None``, so the
+        pre-setup case is just "stash for later".
         """
-        if self.engine is None:
-            self._runtime_settings = rs
-            return
         self._dispatch_runtime_settings_to_engine(rs)
         self._runtime_settings = rs
 
@@ -379,7 +378,7 @@ class TorchTensorRTModule(torch.nn.Module):  # type: ignore[misc]
             # No-op fast path: same disk path + handle is still attached. For
             # the cpp rt the torchbind sibling must also still be live, since
             # the C++ engine compares the underlying pointer for equality.
-            if old is not None and getattr(old, "path", None) == rc:
+            if old is not None and old.path == rc:
                 if self._use_python_runtime:
                     rs_for_dispatch = rs.merge(runtime_cache=old)
                     return rs_for_dispatch, False

@@ -174,7 +174,7 @@ class TRTRuntimeConfig:
         if new == self._settings:
             return False
         self._settings = new
-        self._live = None
+        self.reset()
         return True
 
     def ensure_initialized(self, cuda_engine: Any) -> None:
