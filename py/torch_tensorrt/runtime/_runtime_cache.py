@@ -56,6 +56,14 @@ class RuntimeCacheHandle:
     ``trt.IRuntimeCache``) or ``_torchbind`` (TorchBind
     ``RuntimeCacheHandle`` sibling) is populated; the Python runtime path
     populates the former, the C++ runtime path populates the latter.
+
+    **Equality is identity-based.** Two handles wrap distinct underlying
+    ``IRuntimeCache`` instances even when they share a path, and the runtime
+    treats them as such (separate ``IRuntimeConfig`` slots, no
+    kernel-specialization sharing). So ``a == b`` iff ``a is b``. This falls
+    out of Python's default ``object.__eq__`` semantics; no explicit override
+    is needed. Used by ``update_runtime_settings`` to fast-path the
+    "same handle, no change" case.
     """
 
     def __init__(
@@ -119,17 +127,17 @@ class RuntimeCacheHandle:
     def load_from_stream(self, stream: IO[bytes]) -> int:
         """Read bytes from ``stream`` and deserialize into the underlying cache.
 
-        Returns the number of bytes consumed. No-op (returns 0) when no cache
-        backing is present, the stream isn't readable, or the stream is empty.
-        Path-mode :meth:`load` delegates here once the file is opened.
+        Returns the number of bytes consumed. ``0`` means "nothing to load" --
+        either the handle has no backing cache yet or the stream had no bytes
+        (first-run case, mirroring path-mode's missing-file early-return).
+        IO errors from the stream itself (closed handle, ``UnsupportedOperation``
+        on a write-only sink, etc.) propagate -- the caller passed something
+        wrong and should hear about it. Path-mode :meth:`load` delegates here
+        once the file is opened.
         """
         if self._cache is None and self._torchbind is None:
             return 0
-        try:
-            data = stream.read()
-        except (AttributeError, OSError):
-            # Write-only or otherwise unreadable -- treat as "nothing to load".
-            return 0
+        data = stream.read()
         if not data:
             return 0
         self._write_bytes(data)
@@ -139,19 +147,17 @@ class RuntimeCacheHandle:
     def save_to_stream(self, stream: IO[bytes]) -> int:
         """Serialize the underlying cache and write bytes to ``stream``.
 
-        Returns the number of bytes written. No-op (returns 0) when the cache
-        has nothing to serialize or the stream isn't writable. Path-mode
-        :meth:`save` delegates here once the temp file is opened.
+        Returns the number of bytes written. ``0`` means "nothing to save" --
+        the cache hadn't picked up any entries yet. IO errors from the stream
+        (closed handle, ``UnsupportedOperation`` on a read-only sink, etc.)
+        propagate. Path-mode :meth:`save` delegates here once the tmp file is
+        opened and uses the return value to decide whether to promote the tmp
+        to the destination (avoids writing a zero-byte cache file).
         """
         data = self._read_bytes()
         if not data:
             return 0
-        try:
-            stream.write(data)
-        except (AttributeError, OSError):
-            # Read-only stream; caller's choice -- stay silent rather than
-            # propagate, matching the early-return for an empty path.
-            return 0
+        stream.write(data)
         logger.debug(f"Saved runtime cache to stream ({len(data)} bytes)")
         return len(data)
 
@@ -216,14 +222,6 @@ class RuntimeCacheHandle:
                 self.save()
             except Exception:
                 pass
-
-    def __eq__(self, other: object) -> bool:
-        # Identity equality so passing the same handle twice through
-        # update_runtime_settings is a fast-path no-op.
-        return self is other
-
-    def __hash__(self) -> int:
-        return id(self)
 
     def __repr__(self) -> str:
         return (
