@@ -37,19 +37,15 @@ CudaGraphStrategy to_cuda_graph_strategy(int32_t v) {
 }
 
 std::string_view ds_strategy_name(DynamicShapesKernelSpecializationStrategy v) {
-  auto const i = static_cast<std::underlying_type_t<decltype(v)>>(v);
-  if (i < 0 || static_cast<size_t>(i) >= kDsStrategyNames.size()) {
-    return "<unknown>";
-  }
-  return kDsStrategyNames[static_cast<size_t>(i)];
+  // Negative underlying values wrap to a huge ``size_t``, so a single bounds
+  // check from the top covers both ends without needing ``std::clamp``.
+  auto const i = static_cast<size_t>(v);
+  return i < kDsStrategyNames.size() ? kDsStrategyNames[i] : "<unknown>";
 }
 
 std::string_view cg_strategy_name(CudaGraphStrategy v) {
-  auto const i = static_cast<std::underlying_type_t<decltype(v)>>(v);
-  if (i < 0 || static_cast<size_t>(i) >= kCgStrategyNames.size()) {
-    return "<unknown>";
-  }
-  return kCgStrategyNames[static_cast<size_t>(i)];
+  auto const i = static_cast<size_t>(v);
+  return i < kCgStrategyNames.size() ? kCgStrategyNames[i] : "<unknown>";
 }
 
 // ---- RuntimeCacheHandle methods ---------------------------------------------

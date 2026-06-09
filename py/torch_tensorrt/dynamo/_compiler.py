@@ -110,7 +110,6 @@ def cross_compile_for_windows(
     dynamically_allocate_resources: bool = _defaults.DYNAMICALLY_ALLOCATE_RESOURCES,
     decompose_attention: bool = _defaults.DECOMPOSE_ATTENTION,
     attn_bias_is_causal: bool = _defaults.ATTN_BIAS_IS_CAUSAL,
-    runtime_settings: Optional[RuntimeSettings] = None,
     **kwargs: Any,
 ) -> torch.fx.GraphModule:
     """Compile an ExportedProgram module using TensorRT in Linux for Inference in Windows
@@ -385,7 +384,6 @@ def cross_compile_for_windows(
         trt_arg_inputs,
         trt_kwarg_inputs,
         settings,
-        runtime_settings=runtime_settings,
     )
     return trt_gm
 
