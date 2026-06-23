@@ -256,6 +256,59 @@ def test_hybrid_relu_fallback(ir, tmpdir):
 
 
 @pytest.mark.unit
+@pytest.mark.critical
+@unittest.skipIf(
+    not importlib.util.find_spec("torchvision"),
+    "torchvision is not installed",
+)
+def test_resnet18_relu_fallback(ir, tmpdir):
+    """
+    Hybrid model with multiple Pytorch fallback segments around residual
+    connections. Regression test for a topological-order violation in the
+    exporter's inline-torch-modules pass when a submodule placeholder shared
+    a name (e.g. ``getitem``) with an unrelated TRT-engine output node
+    elsewhere in the parent graph (issue #4359).
+    """
+    trt_ep_path = os.path.join(tmpdir, "trt.ep")
+
+    model = models.resnet18().eval().cuda()
+    input = torch.randn((1, 3, 224, 224)).to("cuda")
+
+    compile_spec = {
+        "inputs": [
+            torchtrt.Input(
+                input.shape, dtype=torch.float, format=torch.contiguous_format
+            )
+        ],
+        "ir": ir,
+        "min_block_size": 1,
+        "torch_executed_ops": {"torch.ops.aten.relu.default"},
+        "cache_built_engines": False,
+        "reuse_cached_engines": False,
+    }
+
+    exp_program = torchtrt.dynamo.trace(model, **compile_spec)
+    trt_module = torchtrt.dynamo.compile(exp_program, **compile_spec)
+    torchtrt.save(trt_module, trt_ep_path, retrace=False)
+
+    deser_trt_module = torchtrt.load(trt_ep_path).module()
+    outputs_pyt = model(input)
+    outputs_trt = trt_module(input)
+    cos_sim = cosine_similarity(outputs_pyt, outputs_trt[0])
+    assertions.assertTrue(
+        cos_sim > COSINE_THRESHOLD,
+        msg=f"test_resnet18_relu_fallback TRT outputs don't match with the original model. Cosine sim score: {cos_sim} Threshold: {COSINE_THRESHOLD}",
+    )
+
+    outputs_trt_deser = deser_trt_module(input)
+    cos_sim = cosine_similarity(outputs_pyt, outputs_trt_deser[0])
+    assertions.assertTrue(
+        cos_sim > COSINE_THRESHOLD,
+        msg=f"test_resnet18_relu_fallback deserialized TRT outputs don't match with the original model. Cosine sim score: {cos_sim} Threshold: {COSINE_THRESHOLD}",
+    )
+
+
+@pytest.mark.unit
 @unittest.skipIf(
     not importlib.util.find_spec("torchvision"),
     "torchvision is not installed",
