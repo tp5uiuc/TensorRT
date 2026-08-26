@@ -30,6 +30,13 @@ class MatMul(nn.Module):
         return torch.matmul(a, b)
 
 
+class Addmm(nn.Module):
+    """aten.addmm.default: the fused bias-add form of a GEMM, guarded on the same target."""
+
+    def forward(self, inp, mat1, mat2):
+        return torch.ops.aten.addmm.default(inp, mat1, mat2)
+
+
 class Conv3d(nn.Module):
     def __init__(self):
         super().__init__()
@@ -131,6 +138,18 @@ class TestTuringCapabilityGuards(TestCase):
     def test_declared_turing_target_falls_back_fp32_gemm(self):
         mod = MatMul()
         inputs = (torch.randn(4, 8).cuda(), torch.randn(8, 16).cuda())
+        compiled = self._compile(mod, inputs, target_compute_capabilities=[TURING])
+        self.assertEqual(_trt_submodule_count(compiled), 0)
+        self._assert_matches_eager(mod, compiled, inputs)
+
+    def test_declared_turing_target_falls_back_fp32_addmm(self):
+        # addmm survives lowering as its own node, so the GEMM guard sees it directly.
+        mod = Addmm()
+        inputs = (
+            torch.randn(4, 6).cuda(),
+            torch.randn(4, 5).cuda(),
+            torch.randn(5, 6).cuda(),
+        )
         compiled = self._compile(mod, inputs, target_compute_capabilities=[TURING])
         self.assertEqual(_trt_submodule_count(compiled), 0)
         self._assert_matches_eager(mod, compiled, inputs)

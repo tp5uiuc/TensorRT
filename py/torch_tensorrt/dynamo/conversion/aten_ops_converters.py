@@ -797,10 +797,15 @@ def gemm_capability_validator(
     are unaffected and keep running on TensorRT.
 
     Note this relies on ``meta["val"]`` being populated, as every validator in this
-    module does. Graphs produced by ``torch.export`` always populate it. The converter
-    unit-test harness (``DispatchTestCase``) does not populate node meta at all, so
-    dtype cannot be determined there; those tests guard themselves with ``skipTest``
-    instead.
+    module does, and fails open when it is not. Graphs produced by ``torch.export``
+    always populate it. In the converter unit tests it is decided per ``run_test``
+    call: ``DispatchTestCase`` only traces with ``torch.export`` when the caller passes
+    ``use_dynamo_tracer=True``, or when the test file's name happens to match
+    ``^test_a`` -- see ``get_use_dynamo_tracer`` in
+    ``tests/py/dynamo/conversion/harness.py``. Where the tracer does run, this guard
+    fires and, because that harness has no PyTorch-fallback path, the test raises
+    ``UnsupportedOperatorException``; such tests guard themselves with ``skipTest``.
+    Where it does not, the guard is silently a no-op.
     """
     if not trt_rtx_targets_turing(settings):
         return True
