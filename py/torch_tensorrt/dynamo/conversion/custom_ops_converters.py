@@ -1,17 +1,22 @@
 # mypy: disallow-untyped-decorators=False
 
 import logging
-from typing import Dict, Sequence, Tuple, Union
+from typing import Dict, Optional, Sequence, Tuple, Union
 
 import tensorrt as trt
-from torch.fx.node import Argument, Target
+from torch.fx.node import Argument, Node, Target
 from torch_tensorrt._features import ENABLED_FEATURES
+from torch_tensorrt.dynamo._settings import CompilationSettings
 from torch_tensorrt.dynamo._SourceIR import SourceIR
 from torch_tensorrt.dynamo.conversion import impl
 from torch_tensorrt.dynamo.conversion._ConversionContext import ConversionContext
 from torch_tensorrt.dynamo.conversion._ConverterRegistry import (
     dynamo_tensorrt_converter,
 )
+from torch_tensorrt.dynamo.conversion.aten_ops_converters import (
+    turing_rejects_forward_convolution,
+)
+from torch_tensorrt.dynamo.conversion.converter_utils import args_bounds_check
 from torch_tensorrt.dynamo.lowering.passes.fuse_distributed_ops import (
     tensorrt_fused_nccl_all_gather_op,
     tensorrt_fused_nccl_all_reduce_op,
@@ -27,7 +32,35 @@ from torch_tensorrt.dynamo.lowering.passes.fuse_pad_into_convolution import (
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
 
-@dynamo_tensorrt_converter(tensorrt_conv_asym_pad_op, supports_dynamic_shapes=True)
+def conv_asym_pad_capability_validator(
+    node: Node, settings: Optional[CompilationSettings] = None
+) -> bool:
+    """Apply the aten.convolution capability guards to the fused pad+conv op.
+
+    ``fuse_pad_into_convolution`` rewrites constant_pad_nd -> aten.convolution into
+    this op during lowering, which erases the aten.convolution node that
+    ``convolution_capability_validator`` would otherwise have rejected. Without this,
+    the pass smuggles a 3D convolution past that guard onto Turing (SM 7.5), where it
+    surfaces at runtime as a null execution context. The pass runs in the normal
+    compile path, so this is not confined to tests.
+
+    Spatial rank is read straight off the argument list -- args are
+    (source, weight, bias, stride, pre_padding, post_padding, dilation, groups) -- so
+    the guard holds whether or not the caller traced with dynamo, unlike the
+    meta-based validators. There is no ``transposed`` argument because the pass skips
+    transposed convolutions outright, so the deconvolution half of
+    ``convolution_capability_validator`` has nothing to check here.
+    """
+    stride = args_bounds_check(node.args, 3)
+    spatial_rank = len(stride) if stride is not None else None
+    return not turing_rejects_forward_convolution(node, spatial_rank, settings)
+
+
+@dynamo_tensorrt_converter(
+    tensorrt_conv_asym_pad_op,
+    capability_validator=conv_asym_pad_capability_validator,
+    supports_dynamic_shapes=True,
+)
 def conv_asym_pad(
     ctx: ConversionContext,
     target: Target,
