@@ -3387,7 +3387,76 @@ def aten_ops_convolution(
         )
 
 
-@dynamo_tensorrt_converter(torch.ops.aten._cdist_forward.default)
+# Above this many rows in either operand, the p == 2 path of
+# impl.normalization.cdist_forward switches from a broadcast-subtract to a matrix
+# multiply. Kept deliberately in sync with the threshold in that converter.
+_CDIST_MM_ROW_THRESHOLD = 25
+
+
+def cdist_forward_capability_validator(
+    node: Node, settings: Optional[CompilationSettings] = None
+) -> bool:
+    """Reject the cdist variants whose converter emits a GEMM, on Turing (SM 7.5).
+
+    ``impl.normalization.cdist_forward`` computes ``p == 2`` with a matrix-multiply layer
+    when ``compute_mode`` is 1, or when it is 0/absent and either operand has more than 25
+    rows. That GEMM is emitted *inside* the converter, so the graph holds a single
+    ``_cdist_forward`` node and no ``mm``/``bmm`` for ``gemm_capability_validator`` to
+    reject. On Turing TensorRT-RTX then fails cuDNN graph compilation with "No valid engine
+    configs for Matmul_MUL_SUB_SQRT_" and ``createExecutionContext()`` returns nullptr.
+
+    Unlike ``gemm_capability_validator`` this deliberately does **not** key on dtype.
+    Measured on a T4, the fused Matmul_MUL_SUB_SQRT_ pattern fails for FP16 operands too,
+    under every ``enabled_precisions`` setting, even though a bare FP16 GEMM runs there
+    perfectly well. What predicts the failure is whether the matmul layer is emitted at
+    all, so that -- and only that -- is what this tests.
+
+    The row threshold is not an optimisation: below it no GEMM is emitted and the op runs
+    correctly on Turing in both dtypes. Rejecting those anyway would be actively harmful,
+    because PyTorch's own ``cdist_cuda`` kernel has no Half implementation and the fallback
+    would raise where TensorRT-RTX succeeds today.
+
+    Like every validator in this module this relies on ``meta["val"]`` and fails open when
+    it is absent. A cdist whose shapes are not statically known cannot reach TensorRT
+    regardless: the converter is not registered ``supports_dynamic_shapes``, so the
+    partitioner refuses it under dynamic shapes before this ever matters.
+    """
+    if not trt_rtx_targets_turing(settings):
+        return True
+
+    if args_bounds_check(node.args, 2, 2.0) != 2:
+        return True
+
+    # The converter normalises a missing or None compute_mode to 0.
+    compute_mode = args_bounds_check(node.args, 3, None)
+    if compute_mode is None:
+        compute_mode = 0
+
+    if compute_mode == 0:
+        rows: List[int] = []
+        for arg in node.args[:2]:
+            val = arg.meta.get("val") if hasattr(arg, "meta") else None
+            shape = getattr(val, "shape", None)
+            if shape is None or len(shape) < 2 or not isinstance(shape[-2], int):
+                return True
+            rows.append(shape[-2])
+        if all(r <= _CDIST_MM_ROW_THRESHOLD for r in rows):
+            return True
+    elif compute_mode != 1:
+        return True
+
+    _LOGGER.debug(
+        "cdist '%s' computes p=2 as a matrix multiply, which is not supported on "
+        "TensorRT-RTX for Turing (SM 7.5). Falling back to PyTorch.",
+        node.name,
+    )
+    return False
+
+
+@dynamo_tensorrt_converter(
+    torch.ops.aten._cdist_forward.default,
+    capability_validator=cdist_forward_capability_validator,
+)
 def aten_ops_cdist_forward(
     ctx: ConversionContext,
     target: Target,
