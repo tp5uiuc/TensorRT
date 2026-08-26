@@ -98,12 +98,16 @@ def skip_if_trt_rtx_turing(test_case: TestCase, what: str) -> None:
     capability validator or via the partitioner.
 
     Converter unit tests get neither. ``DispatchTestCase.run_test`` hands the graph
-    straight to ``TRTInterpreter``, skipping the partitioner, and the graphs it builds
-    carry **empty node meta** -- so a dtype-based capability validator cannot even see
-    the operand types here. A rejected node therefore raises
-    ``UnsupportedOperatorException`` rather than falling back, and an unsupported one
-    that is not rejected reaches TensorRT-RTX and fails (or, for bf16, crashes the
-    process). Hence the explicit skip.
+    straight to ``TRTInterpreter``, skipping the partitioner, so a rejected node raises
+    ``UnsupportedOperatorException`` rather than falling back, and an unsupported node
+    that is *not* rejected reaches TensorRT-RTX and fails (or, for bf16, crashes the
+    process). Either way the test needs an explicit skip.
+
+    Which of those two it would hit varies per ``run_test`` call, because a dtype-based
+    validator can only see operand types when ``node.meta["val"]`` is populated, and
+    that only happens when the dynamo tracer runs. ``get_use_dynamo_tracer`` below
+    decides that from an explicit ``use_dynamo_tracer=`` argument or, failing that,
+    from whether the test file's name matches ``^test_a``.
     """
     import torch_tensorrt
 
