@@ -3262,6 +3262,39 @@ def aten_ops_le(
     )
 
 
+_TURING_UNSUPPORTED_CONV_SPATIAL_RANK = 3
+
+
+def turing_rejects_forward_convolution(
+    node: Node,
+    spatial_rank: Optional[int],
+    settings: Optional[CompilationSettings] = None,
+) -> bool:
+    """Whether a forward convolution over ``spatial_rank`` spatial dims must fall back.
+
+    TensorRT-RTX does not support 3D convolutions on Turing (SM 7.5): the engine
+    builds, but createExecutionContext() then returns nullptr because the JIT
+    compiler finds no valid kernel config for 3D ConvFwd on SM 7.5. Transposed 3D
+    convolution is a distinct layer and is unaffected, so callers must only ask about
+    non-transposed convolutions.
+
+    Shared by every converter that can carry a forward convolution -- aten.convolution
+    below, and the fused tensorrt::conv_asym_pad that the pad-folding lowering pass
+    emits -- so a future change to the rule lands in one place. A caller that cannot
+    determine the rank passes None and the guard fails open.
+    """
+    if spatial_rank != _TURING_UNSUPPORTED_CONV_SPATIAL_RANK:
+        return False
+    if not trt_rtx_targets_turing(settings):
+        return False
+    _LOGGER.debug(
+        "3D convolution '%s' is not supported on TensorRT-RTX for Turing "
+        "(SM 7.5). Falling back to PyTorch.",
+        node.name,
+    )
+    return True
+
+
 def convolution_capability_validator(
     node: Node, settings: Optional[CompilationSettings] = None
 ) -> bool:
@@ -3288,20 +3321,13 @@ def convolution_capability_validator(
         )
         return False
 
-    # TensorRT-RTX does not support 3D convolutions on Turing (SM 7.5): the engine
-    # builds, but createExecutionContext() then returns nullptr because the JIT
-    # compiler finds no valid kernel config for 3D ConvFwd on SM 7.5.
-    # Transposed 3D convolution is a distinct layer and is unaffected, so this
-    # deliberately does not fire for deconvolution.
-    # aten.convolution input is (N, C, *spatial), so 5 dims means 3 spatial dims.
-    if trt_rtx_targets_turing(settings) and not args_bounds_check(node.args, 6):
+    # aten.convolution input is (N, C, *spatial), so ndim - 2 is the spatial rank.
+    # Like every validator in this module this relies on meta["val"] and fails open
+    # when it is absent.
+    if not args_bounds_check(node.args, 6):  # transposed?
         val = node.args[0].meta.get("val") if hasattr(node.args[0], "meta") else None
-        if val is not None and val.ndim == 5:
-            _LOGGER.debug(
-                "3D convolution '%s' is not supported on TensorRT-RTX for Turing "
-                "(SM 7.5). Falling back to PyTorch.",
-                node.name,
-            )
+        spatial_rank = val.ndim - 2 if val is not None else None
+        if turing_rejects_forward_convolution(node, spatial_rank, settings):
             return False
 
     return True
