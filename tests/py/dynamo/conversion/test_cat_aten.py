@@ -177,6 +177,13 @@ class TestCatConverter(DispatchTestCase):
 
     def test_cat_three_different_dtypes(self):
         """Test cat with three different dtypes - bfloat16, float16, float32"""
+        # The cat promotes bf16 + fp16 + fp32 to fp32, so no bf16 tensor is computed
+        # on -- but TensorRT-RTX rejects the *network* for naming the type at all:
+        # "Cannot compile for target(s) sm75, because the model contains HW-specific
+        # datatypes: b16". That rejection only appears once the engine is told which
+        # capability it is building for; with the target unset the builder JIT-ed for
+        # the current device and never applied the rule.
+        skip_if_trt_rtx_turing(self, "bfloat16")
 
         class ThreeDtypeCat(nn.Module):
             def __init__(self):
@@ -345,8 +352,7 @@ class TestCatConverter(DispatchTestCase):
     def test_cat_bf16_dtype_preservation(self):
         """Test that bfloat16 dtype is preserved in constant layers (not converted to fp32)"""
         # The engine's input and output are both bf16 here, so bf16 really does reach
-        # TensorRT. test_cat_three_different_dtypes above also builds a bf16 constant but
-        # the cat promotes it to fp32, so that one still runs on Turing.
+        # TensorRT.
         skip_if_trt_rtx_turing(self, "bfloat16")
 
         class CatBF16Constants(nn.Module):

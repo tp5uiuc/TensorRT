@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 import torch
 import torch.nn as nn
@@ -6,6 +7,7 @@ import torch.nn.functional as F
 import torch_tensorrt as torchtrt
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch_tensorrt._features import ENABLED_FEATURES
+from torch_tensorrt.dynamo.conversion._TRTInterpreter import TRTInterpreter
 
 TURING = (7, 5)
 
@@ -359,6 +361,45 @@ class TestTuringCapabilityGuards(TestCase):
         from torch_tensorrt.dynamo._settings import _SETTINGS_TO_BE_ENGINE_INVARIANT
 
         self.assertIn("target_compute_capabilities", _SETTINGS_TO_BE_ENGINE_INVARIANT)
+
+    # -- engine targeting resolves the same setting partitioning does --------------
+    # Asserting on the builder config rather than on compile success is what makes
+    # these runnable off Turing: an unset capability only *fails* on SM 7.5, where
+    # Myelin looks for a precompiled module for a refittable graph and reports
+    # "Compatible cubin or ptx module for device target '75' not found". Everywhere
+    # else the drift is silent.
+
+    def _compute_capability_counts(self, mod, inputs, **kwargs):
+        """num_compute_capabilities of every builder config this compile produced."""
+        counts = []
+        original = TRTInterpreter._populate_trt_builder_config
+
+        def spy(interpreter, *args, **kwargs_):
+            builder_config = original(interpreter, *args, **kwargs_)
+            counts.append(builder_config.num_compute_capabilities)
+            return builder_config
+
+        with mock.patch.object(TRTInterpreter, "_populate_trt_builder_config", spy):
+            self._compile(mod, inputs, **kwargs)
+        self.assertTrue(counts, "no engine was built, so nothing was asserted")
+        return counts
+
+    def test_refittable_build_targets_a_compute_capability_by_default(self):
+        # Refittable builds are the ones that fail when the capability is left unset.
+        counts = self._compute_capability_counts(
+            Conv2d(), (torch.randn(1, 4, 8, 8).cuda(),), immutable_weights=False
+        )
+        self.assertTrue(all(count == 1 for count in counts), counts)
+
+    def test_declared_target_sets_a_capability_per_declared_target(self):
+        targets = [TURING]
+        counts = self._compute_capability_counts(
+            Conv2d(),
+            (torch.randn(1, 4, 8, 8).cuda(),),
+            immutable_weights=False,
+            target_compute_capabilities=targets,
+        )
+        self.assertTrue(all(count == len(targets) for count in counts), counts)
 
 
 @unittest.skipIf(
