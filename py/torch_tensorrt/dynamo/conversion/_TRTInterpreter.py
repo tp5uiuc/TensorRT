@@ -25,7 +25,10 @@ from torch.utils._python_dispatch import _disable_current_modes
 from torch_tensorrt import ENABLED_FEATURES
 from torch_tensorrt._enums import dtype
 from torch_tensorrt._Input import Input
-from torch_tensorrt._utils import is_tensorrt_version_supported
+from torch_tensorrt._utils import (
+    get_target_compute_capabilities,
+    is_tensorrt_version_supported,
+)
 from torch_tensorrt.dynamo._engine_cache import BaseEngineCache
 from torch_tensorrt.dynamo._settings import CompilationSettings
 from torch_tensorrt.dynamo.conversion._ConversionContext import ConversionContext
@@ -384,34 +387,55 @@ class TRTInterpreter(torch.fx.Interpreter):  # type: ignore[misc]
                     self.compilation_settings.l2_limit_for_tiling
                 )
 
-        # TensorRT-RTX ahead-of-time targeting. Left unset, TensorRT-RTX compiles for
-        # whatever device is present at build time, which is right for
-        # compile-here-run-here but cannot produce an artifact for another
-        # architecture. Turing in particular is opt-in: including it by default may
-        # cost performance elsewhere. The same setting drives the capability
-        # validators, so partitioning and engine targeting cannot drift apart.
-        if (
-            ENABLED_FEATURES.tensorrt_rtx
-            and self.compilation_settings.target_compute_capabilities
-        ):
-            targets = self.compilation_settings.target_compute_capabilities
-            builder_config.num_compute_capabilities = len(targets)
-            for idx, (major, minor) in enumerate(targets):
-                name = f"SM{major}{minor}"
-                compute_capability = getattr(trt.ComputeCapability, name, None)
-                if compute_capability is None:
-                    supported = [
-                        m for m in dir(trt.ComputeCapability) if m.startswith("SM")
-                    ]
-                    raise ValueError(
-                        f"TensorRT-RTX has no compute capability {name} for requested "
-                        f"target ({major}, {minor}). Supported: {supported}"
-                    )
-                if not builder_config.set_compute_capability(compute_capability, idx):
+        # TensorRT-RTX ahead-of-time targeting. Declared targets name the architectures
+        # the artifact is built for, which is what makes it deployable somewhere other
+        # than the build host. Turing is opt-in as an *additional* target: including
+        # SM 7.5 in a multi-target build can constrain kernel selection for the others.
+        #
+        # An undeclared target still has to be resolved, not skipped. Leaving the builder
+        # at its default reports num_compute_capabilities == 0, and for a refittable graph
+        # Myelin then looks for a precompiled module instead of JIT-ing one, failing with
+        # "Compatible cubin or ptx module for device target '75' not found". It also drifts
+        # from the capability validators, which resolve an undeclared target to the current
+        # device via get_target_compute_capabilities(). So resolve it here the same way,
+        # naming the current device explicitly. ComputeCapability.CURRENT rather than a
+        # SM<major><minor> lookup, because TensorRT-RTX only names a subset of
+        # architectures and the implicit path must not fail on a device outside it.
+        if ENABLED_FEATURES.tensorrt_rtx:
+            declared = self.compilation_settings.target_compute_capabilities
+            if declared:
+                builder_config.num_compute_capabilities = len(declared)
+                for idx, (major, minor) in enumerate(declared):
+                    name = f"SM{major}{minor}"
+                    compute_capability = getattr(trt.ComputeCapability, name, None)
+                    if compute_capability is None:
+                        supported = [
+                            m for m in dir(trt.ComputeCapability) if m.startswith("SM")
+                        ]
+                        raise ValueError(
+                            f"TensorRT-RTX has no compute capability {name} for requested "
+                            f"target ({major}, {minor}). Supported: {supported}"
+                        )
+                    if not builder_config.set_compute_capability(
+                        compute_capability, idx
+                    ):
+                        raise RuntimeError(
+                            f"Failed to set TensorRT-RTX compute capability {name}"
+                        )
+                _LOGGER.info(f"Targeting TensorRT-RTX compute capabilities {declared}")
+            else:
+                builder_config.num_compute_capabilities = 1
+                if not builder_config.set_compute_capability(
+                    trt.ComputeCapability.CURRENT, 0
+                ):
                     raise RuntimeError(
-                        f"Failed to set TensorRT-RTX compute capability {name}"
+                        "Failed to set the TensorRT-RTX compute capability of the "
+                        "current device"
                     )
-            _LOGGER.info(f"Targeting TensorRT-RTX compute capabilities {targets}")
+                _LOGGER.info(
+                    "Targeting the TensorRT-RTX compute capability of the current "
+                    f"device {get_target_compute_capabilities(self.compilation_settings)}"
+                )
 
         return builder_config
 
