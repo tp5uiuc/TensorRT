@@ -4,7 +4,7 @@ from parameterized import parameterized
 from torch.testing._internal.common_utils import run_tests
 from torch_tensorrt import Input
 
-from .harness import DispatchTestCase
+from .harness import DispatchTestCase, skip_if_trt_rtx_turing
 
 
 class TestCatConverter(DispatchTestCase):
@@ -344,6 +344,10 @@ class TestCatConverter(DispatchTestCase):
 
     def test_cat_bf16_dtype_preservation(self):
         """Test that bfloat16 dtype is preserved in constant layers (not converted to fp32)"""
+        # The engine's input and output are both bf16 here, so bf16 really does reach
+        # TensorRT. test_cat_three_different_dtypes above also builds a bf16 constant but
+        # the cat promotes it to fp32, so that one still runs on Turing.
+        skip_if_trt_rtx_turing(self, "bfloat16")
 
         class CatBF16Constants(nn.Module):
             def __init__(self):
