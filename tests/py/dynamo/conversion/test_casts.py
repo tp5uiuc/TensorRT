@@ -9,7 +9,7 @@ from torch.testing._internal.common_utils import run_tests
 from torch_tensorrt import dtype
 from torch_tensorrt.dynamo.conversion import UnsupportedOperatorException
 
-from .harness import DispatchTestCase
+from .harness import DispatchTestCase, skip_if_trt_rtx_turing
 
 
 class TestCloneConverter(DispatchTestCase):
@@ -68,6 +68,8 @@ class TestToCopyConverter(DispatchTestCase):
         )
 
     def test_to_copy_bfloat16(self):
+        skip_if_trt_rtx_turing(self, "bfloat16")
+
         class ToCopyBFloat16(nn.Module):
             def forward(self, x):
                 y = torch.ops.aten._to_copy.default(x, dtype=torch.bfloat16)
