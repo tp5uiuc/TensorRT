@@ -357,6 +357,39 @@ def copy_submodule_attributes(
         _assign_attr(value, gm, key, _AttrKind.BUFFER)
 
 
+def _order_placeholders_first(gm: torch.fx.GraphModule) -> None:
+    """Hoist every placeholder to the front of the node list, keeping their
+    relative order.
+
+    ``make_constraints()`` (torch._export.non_strict_utils) walks
+    ``enumerate(gm.graph.nodes)`` and indexes ``flat_dynamic_shapes`` with the
+    *node* index, so it carries an unstated precondition: the placeholders must
+    be the leading nodes of the graph. Every graph torch.export produces
+    satisfies it. The graph the partitioner hands back when ops fall back to
+    PyTorch does not -- unlifting reinstates the module parameters as get_attr
+    nodes ahead of the user inputs, so a lone user input sitting at node index 2
+    makes the lookup ``flat_dynamic_shapes[2]`` on a one-element list and
+    ``save()`` dies with a bare ``IndexError: list index out of range``. Its
+    length check (``len(flat_dynamic_shapes) == num_placeholders -
+    num_lifted_inputs``) passes, so nothing reports the real problem.
+
+    Placeholders take no arguments, so hoisting one can never break the
+    topological order, and preserving their relative order leaves the forward
+    signature, ``input_nodes``, ``in_spec`` and the InputSpec ordering unchanged.
+    """
+    nodes = list(gm.graph.nodes)
+    placeholders = [node for node in nodes if node.op == "placeholder"]
+    if not placeholders or nodes[: len(placeholders)] == placeholders:
+        return
+
+    for node in reversed(placeholders):
+        first = next(iter(gm.graph.nodes))
+        if node is not first:
+            first.prepend(node)
+
+    gm.graph.lint()
+
+
 def create_trt_exp_program(
     gm: torch.fx.GraphModule,
     *,
@@ -367,6 +400,12 @@ def create_trt_exp_program(
     """Creates a new Exported Program. This function takes an torch.fx.GraphModule which has TRT engines
     and constructs an Exported Program object with the new IO node names and state_dict
     """
+
+    # A graph whose ops fell back to PyTorch carries its parameters as get_attr
+    # nodes ahead of the user inputs; make_constraints() below indexes by node
+    # position and cannot read such a graph. Normalize to the placeholders-first
+    # shape torch.export emits. No-op for a fully converted graph.
+    _order_placeholders_first(gm)
 
     input_nodes = [node for node in gm.graph.nodes if node.op == "placeholder"]
     output_nodes = [node for node in gm.graph.nodes if node.op == "output"]
